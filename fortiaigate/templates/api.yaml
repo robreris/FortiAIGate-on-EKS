@@ -1,0 +1,141 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    app: api
+    component: api
+    app.kubernetes.io/name: fortiaigate
+    app.kubernetes.io/part-of: fortiaigate-platform
+    app.kubernetes.io/managed-by: helm
+spec:
+  replicas: {{ .Values.api.replicas }}
+  strategy:
+    type: {{ .Values.fortiaigate.updateStrategy }}
+  selector:
+    matchLabels:
+      app: api
+      component: api
+  template:
+    metadata:
+      {{- if eq (include "fortiaigate.shouldMountTlsSecret" .) "true" }}
+      annotations:
+        checksum/tls: {{ include "fortiaigate.tlsChecksum" . }}
+      {{- end }}
+      labels:
+        app: api
+        component: api
+    spec:
+      {{- include "fortiaigate.renderPlacement" .Values.fortiaigate.workloadPlacement | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: "{{ .Values.fortiaigate.image.repository }}/api:{{ .Values.fortiaigate.image.tag }}"
+          imagePullPolicy: {{ .Values.fortiaigate.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          env:
+            - name: FORTIAIGATE_LOG_LEVEL
+              value: {{ .Values.fortiaigate.env.logLevel | quote }}
+            - name: CSRF_SECRET_KEY
+              {{- if .Values.fortiaigate.env.csrfSecretKey }}
+              value: {{ .Values.fortiaigate.env.csrfSecretKey | quote }}
+              {{- else }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fortiaigate.fullname" . }}-csrf
+                  key: csrf-secret-key
+              {{- end }}
+            {{- include "fortiaigate.appTlsEnv" . | nindent 12 }}
+            {{- include "fortiaigate.redisEnv" . | nindent 12 }}
+            {{- include "fortiaigate.postgresEnv" . | nindent 12 }}
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "fortiaigate.fullname" . }}-db-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "fortiaigate.fullname" . }}-db-config
+                  key: REDIS_PORT
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "fortiaigate.fullname" . }}-db-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "fortiaigate.fullname" . }}-db-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "fortiaigate.fullname" . }}-db-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "fortiaigate.fullname" . }}-db-config
+                  key: POSTGRES_PORT
+          volumeMounts:
+            - name: shared-data
+              mountPath: /etc/fortiaigate/
+            - name: tmp
+              mountPath: /tmp
+            {{- if eq (include "fortiaigate.shouldMountTlsSecret" .) "true" }}
+            - name: tls-certs
+              mountPath: {{ .Values.tls.mountPath | quote }}
+              readOnly: true
+            {{- end }}
+            {{- include "fortiaigate.externalTlsVolumeMounts" . | nindent 12 }}
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: {{ include "fortiaigate.storageClaimName" . }}
+        - name: tmp
+          emptyDir: {}
+        {{- if eq (include "fortiaigate.shouldMountTlsSecret" .) "true" }}
+        - name: tls-certs
+          secret:
+            secretName: {{ include "fortiaigate.tlsSecretName" . }}
+        {{- end }}
+        {{- include "fortiaigate.externalTlsVolumes" . | nindent 8 }}
+      {{- with .Values.fortiaigate.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels:
+    app: api
+    component: api
+spec:
+  selector:
+    app: api
+    component: api
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+      name: http
+  type: ClusterIP

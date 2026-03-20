@@ -1,0 +1,19 @@
+{{- $existingPvName := .Values.storage.existingPvName -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "fortiaigate.storageClaimName" . }}
+  labels:
+    {{- include "fortiaigate.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.storage.size }}
+{{- if $existingPvName }}
+  volumeName: {{ $existingPvName }}
+  storageClassName: ""
+{{- else if .Values.storage.storageClass }}
+  storageClassName: {{ .Values.storage.storageClass }}
+{{- end }}

@@ -1,0 +1,156 @@
+{{- $scannerConfigs := dict
+  "language" (dict "name" "language-scanner" "serviceName" "language" "scannerType" "Language")
+  "code" (dict "name" "code-scanner" "serviceName" "code" "scannerType" "Code")
+  "promptinjection" (dict "name" "promptinjection-scanner" "serviceName" "promptinjection" "scannerType" "PromptInjection")
+  "sensitive" (dict "name" "sensitive-scanner" "serviceName" "sensitive" "scannerType" "Sensitive")
+  "toxicity" (dict "name" "toxicity-scanner" "serviceName" "toxicity" "scannerType" "Toxicity")
+  "anonymize" (dict "name" "anonymize-scanner" "serviceName" "anonymize" "scannerType" "Anonymize")
+  "deanonymize" (dict "name" "deanonymize-scanner" "serviceName" "deanonymize" "scannerType" "Deanonymize")
+  "customrule" (dict "name" "customrule-scanner" "serviceName" "customrule" "scannerType" "CustomRule")
+}}
+{{- range $scanner := list "language" "code" "promptinjection" "sensitive" "toxicity" "anonymize" "deanonymize" "customrule" }}
+{{- $config := index $.Values.scanners $scanner }}
+{{- $scannerInfo := index $scannerConfigs $scanner }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $scannerInfo.name }}
+  labels:
+    app: scanner
+    scanner-type: {{ $scanner }}
+    app.kubernetes.io/name: fortiaigate
+    app.kubernetes.io/part-of: fortiaigate-platform
+    app.kubernetes.io/managed-by: helm
+spec:
+  replicas: {{ $config.replicas }}
+  strategy:
+    type: {{ $.Values.fortiaigate.updateStrategy }}
+  selector:
+    matchLabels:
+      app: scanner
+      scanner-type: {{ $scanner }}
+  template:
+    metadata:
+      {{- if $.Values.tls.enabled }}
+      annotations:
+        checksum/tls: {{ include "fortiaigate.tlsChecksum" $ }}
+      {{- end }}
+      labels:
+        app: scanner
+        scanner-type: {{ $scanner }}
+        app.kubernetes.io/name: fortiaigate
+        app.kubernetes.io/part-of: fortiaigate-platform
+        app.kubernetes.io/managed-by: helm
+    spec:
+      {{- include "fortiaigate.renderPlacement" $.Values.fortiaigate.workloadPlacement | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: scanner
+          image: "{{ $.Values.fortiaigate.image.repository }}/scanner:{{ $.Values.fortiaigate.image.tag }}"
+          imagePullPolicy: {{ $.Values.fortiaigate.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 50051
+            - containerPort: 50052
+          readinessProbe:
+            grpc:
+              port: 50052
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            - name: FORTIAIGATE_LOG_LEVEL
+              value: {{ $.Values.fortiaigate.env.logLevel | quote }}
+            - name: SCANNER_TYPE
+              value: {{ $scannerInfo.scannerType | quote }}
+            - name: SCANNER_MAX_SCAN_CHARS
+              {{- $maxScanChars := $.Values.scanners.env.maxScanChars }}
+              {{- if and $config.env (hasKey $config.env "maxScanChars") }}
+              value: {{ $config.env.maxScanChars | quote }}
+              {{- else }}
+              value: {{ $maxScanChars | quote }}
+              {{- end }}
+            - name: SCANNER_MAX_RPC_CONCURRENCY
+              {{- $maxRpcConcurrency := $.Values.scanners.env.maxRpcConcurrency }}
+              {{- if and $config.env (hasKey $config.env "maxRpcConcurrency") }}
+              value: {{ $config.env.maxRpcConcurrency | quote }}
+              {{- else }}
+              value: {{ $maxRpcConcurrency | quote }}
+              {{- end }}
+            {{- if and (eq $scanner "promptinjection") $.Values.scanners.promptinjection.env }}
+            {{- range $key, $value := $.Values.scanners.promptinjection.env }}
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if and (eq $scanner "toxicity") $.Values.scanners.toxicity.env }}
+            {{- range $key, $value := $.Values.scanners.toxicity.env }}
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            - name: TRITON_URL
+              value: dns:///triton-server:8001
+            {{- include "fortiaigate.appTlsEnv" $ | nindent 12 }}
+          resources:
+            {{- $finalResources := $config.resources | default $.Values.scanners.defaultResources }}
+            limits:
+              {{- range $k, $v := $finalResources.limits }}
+              {{- if or (eq $k "cpu") (eq $k "memory") }}
+              {{ $k }}: {{ $v }}
+              {{- end }}
+              {{- end }}
+            requests:
+              {{- range $k, $v := $finalResources.requests }}
+              {{- if or (eq $k "cpu") (eq $k "memory") }}
+              {{ $k }}: {{ $v }}
+              {{- end }}
+              {{- end }}
+          {{- if $.Values.tls.enabled }}
+          volumeMounts:
+            - name: tls-certs
+              mountPath: {{ $.Values.tls.mountPath | quote }}
+              readOnly: true
+          {{- end }}
+      {{- if $.Values.tls.enabled }}
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: {{ include "fortiaigate.tlsSecretName" $ }}
+      {{- end }}
+      {{- with $.Values.fortiaigate.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $scannerInfo.serviceName }}
+  labels:
+    app: scanner
+    scanner-type: {{ $scanner }}
+    app.kubernetes.io/name: fortiaigate
+    app.kubernetes.io/part-of: fortiaigate-platform
+    app.kubernetes.io/managed-by: helm
+spec:
+  clusterIP: None
+  selector:
+    app: scanner
+    scanner-type: {{ $scanner }}
+  ports:
+    - protocol: TCP
+      port: 50051
+      targetPort: 50051
+      name: grpc
+---
+{{- end }}

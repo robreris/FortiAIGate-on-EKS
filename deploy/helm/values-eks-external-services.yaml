@@ -1,0 +1,37 @@
+# Overlay for using external PostgreSQL and Redis with the FortiAIGate EKS example.
+# Use together with deploy/helm/values-eks.yaml.
+
+postgresql:
+  enabled: false
+
+redis:
+  enabled: false
+
+externalDatabase:
+  enabled: true
+  host: your-rds-endpoint.rds.amazonaws.com
+  port: 5432
+  database: fortiaigate_db
+  username: fortiaigate_postgres_user
+  existingSecret: fortiaigate-external-postgres
+  existingSecretKey: password
+  ssl:
+    enabled: true
+    existingSecret: fortiaigate-external-postgres-tls
+    caFilename: ca.crt
+    # Set these if your deployment needs client-auth TLS.
+    certFilename: ""
+    keyFilename: ""
+
+externalRedis:
+  enabled: true
+  host: your-elasticache-endpoint.cache.amazonaws.com
+  port: 6379
+  existingSecret: fortiaigate-external-redis
+  existingSecretKey: redis-password
+  ssl:
+    enabled: true
+    existingSecret: fortiaigate-external-redis-tls
+    caFilename: ca.crt
+    certFilename: ""
+    keyFilename: ""

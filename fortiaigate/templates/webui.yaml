@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webui
+  labels:
+    app: webui
+    app.kubernetes.io/name: fortiaigate
+    app.kubernetes.io/part-of: fortiaigate-platform
+    app.kubernetes.io/managed-by: helm
+spec:
+  replicas: {{ .Values.webui.replicas }}
+  strategy:
+    type: {{ .Values.fortiaigate.updateStrategy }}
+  selector:
+    matchLabels:
+      app: webui
+  template:
+    metadata:
+      {{- if .Values.tls.enabled }}
+      annotations:
+        checksum/tls: {{ include "fortiaigate.tlsChecksum" . }}
+      {{- end }}
+      labels:
+        app: webui
+    spec:
+      {{- include "fortiaigate.renderPlacement" .Values.fortiaigate.workloadPlacement | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: webui
+          image: "{{ .Values.fortiaigate.image.repository }}/webui:{{ .Values.fortiaigate.image.tag }}"
+          imagePullPolicy: {{ .Values.fortiaigate.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          command: ["node", "https-server.js"]
+          ports:
+            - containerPort: 3000
+          resources:
+            {{- toYaml .Values.webui.resources | nindent 12 }}
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.fortiaigate.env.logLevel | quote }}
+            {{- include "fortiaigate.appTlsEnv" . | nindent 12 }}
+          {{- if .Values.tls.enabled }}
+          volumeMounts:
+            - name: tls-certs
+              mountPath: {{ .Values.tls.mountPath | quote }}
+              readOnly: true
+          {{- end }}
+      {{- if .Values.tls.enabled }}
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: {{ include "fortiaigate.tlsSecretName" . }}
+      {{- end }}
+      {{- with .Values.fortiaigate.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webui
+  labels:
+    app.kubernetes.io/name: fortiaigate
+    app.kubernetes.io/part-of: fortiaigate-platform
+    app.kubernetes.io/managed-by: helm
+spec:
+  selector:
+    app: webui
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+      name: http
+  type: ClusterIP

@@ -1,0 +1,161 @@
+# Example values for deploying the patched FortiAIGate chart to Amazon EKS.
+# Install the release as "fortiaigate" unless you have a reason not to.
+
+fullnameOverride: fortiaigate
+
+fortiaigate:
+  image:
+    repository: 123456789012.dkr.ecr.us-west-2.amazonaws.com/fortiaigate
+    tag: V8.0.0-build0021
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+
+  gpu:
+    enabled: true
+
+  # Single-GPU deployments should avoid RollingUpdate for Triton.
+  updateStrategy: Recreate
+
+  env:
+    logLevel: INFO
+    csrfSecretKey: ""
+
+  # CPU services stay on the app node group.
+  workloadPlacement:
+    nodeSelector:
+      fortiaigate-role: app
+    affinity: {}
+    tolerations: []
+
+  # Only Triton should land on the GPU node group.
+  gpuWorkloadPlacement:
+    nodeSelector:
+      fortiaigate-role: gpu
+    affinity: {}
+    tolerations:
+      - key: fortiaigate-gpu
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+license_manager:
+  # The DaemonSet needs a pod on every node that might run FortiAIGate workloads.
+  placement:
+    nodeSelector: {}
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: fortiaigate-role
+                  operator: In
+                  values:
+                    - app
+                    - gpu
+    tolerations:
+      - key: fortiaigate-gpu
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+storage:
+  size: 100Gi
+  storageClass: efs-sc
+  existingPvName: ""
+  claimName: fortiaigate-storage
+
+ingress:
+  className: alb
+  host: fortiaigate.example.com
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/backend-protocol: HTTPS
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTPS
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:123456789012:certificate/REPLACE_ME
+
+tls:
+  enabled: true
+  existingSecret: fortiaigate-tls-secret
+
+license:
+  existingConfigMap: fortiaigate-license-config
+
+postgresql:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 17.4.0-debian-12-r19
+    pullPolicy: IfNotPresent
+  auth:
+    username: fortiaigate_postgres_user
+    database: fortiaigate_db
+  tls:
+    enabled: true
+    certificatesSecret: fortiaigate-tls-secret
+    certFilename: tls.crt
+    certKeyFilename: tls.key
+    preferServerCiphers: true
+  primary:
+    nodeSelector:
+      fortiaigate-role: app
+    persistence:
+      enabled: true
+      storageClass: efs-sc
+      existingClaim: fortiaigate-storage
+      accessModes:
+        - ReadWriteMany
+
+redis:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis
+    tag: 8.2.0-debian-12-r0
+    pullPolicy: IfNotPresent
+  architecture: standalone
+  tls:
+    enabled: true
+    existingSecret: fortiaigate-tls-secret
+    certFilename: tls.crt
+    certKeyFilename: tls.key
+    certCAFilename: tls.crt
+    authClients: false
+  master:
+    nodeSelector:
+      fortiaigate-role: app
+    persistence:
+      enabled: true
+      storageClass: efs-sc
+      existingClaim: fortiaigate-storage
+      accessModes:
+        - ReadWriteMany
+
+# Optional: move stateful dependencies out of the cluster.
+# If you enable either of these blocks, disable the bundled dependency too.
+# externalDatabase:
+#   enabled: true
+#   host: your-rds-endpoint.rds.amazonaws.com
+#   port: 5432
+#   database: fortiaigate_db
+#   username: fortiaigate_postgres_user
+#   existingSecret: fortiaigate-postgres-password
+#   existingSecretKey: password
+#   ssl:
+#     enabled: true
+#     caFile: /etc/ssl/certs/rds-ca.pem
+#
+# externalRedis:
+#   enabled: true
+#   host: your-elasticache-endpoint.cache.amazonaws.com
+#   port: 6379
+#   existingSecret: fortiaigate-redis-password
+#   existingSecretKey: redis-password
+#   ssl:
+#     enabled: true
+#     caFile: /etc/ssl/certs/redis-ca.pem

@@ -1,0 +1,56 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: fortiaigate-eks
+  region: us-west-2
+  version: "1.35"
+
+iam:
+  withOIDC: true
+
+managedNodeGroups:
+  - name: fortiaigate-app-ng
+    amiFamily: AmazonLinux2023
+    instanceType: m7i.4xlarge
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 2
+    volumeSize: 120
+    privateNetworking: true
+    labels:
+      fortiaigate-role: app
+    tags:
+      Name: fortiaigate-eks-app-ng
+
+  - name: fortiaigate-gpu-ng
+    amiFamily: AmazonLinux2023
+    instanceType: g5.4xlarge
+    desiredCapacity: 1
+    minSize: 1
+    maxSize: 1
+    volumeSize: 350
+    privateNetworking: true
+    labels:
+      fortiaigate-role: gpu
+      accelerator: nvidia
+    taints:
+      - key: fortiaigate-gpu
+        value: "true"
+        effect: NoSchedule
+    tags:
+      Name: fortiaigate-eks-gpu-ng
+
+addons:
+  - name: vpc-cni
+  - name: coredns
+  - name: kube-proxy
+  - name: aws-efs-csi-driver
+    attachPolicyARNs:
+      - arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy
+
+# Notes:
+# - This example keeps node counts fixed while you validate licensing.
+# - The app node group is sized to hold the FortiAIGate CPU services plus bundled PostgreSQL and Redis.
+# - The GPU node group is tainted so only workloads that explicitly tolerate it land there.
+# - The AWS Load Balancer Controller IAM service account is installed after cluster creation; see README.md.

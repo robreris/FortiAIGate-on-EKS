@@ -1,0 +1,323 @@
+# Default values for fortiaigate.
+
+global:
+  security:
+    allowInsecureImages: true
+
+  # Deprecated legacy license mapping.
+  # Prefer the `license` section below so licenses can be injected directly
+  # or sourced from an existing ConfigMap.
+  licenses: {}
+
+fortiaigate:
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+
+  gpu:
+    enabled: true
+
+  updateStrategy: RollingUpdate
+
+  env:
+    logLevel: INFO
+    csrfSecretKey: ""
+
+  # Shared placement for api, core, webui, logd, and scanners.
+  workloadPlacement:
+    nodeSelector: {}
+    affinity: {}
+    tolerations: []
+
+  # Dedicated placement for Triton.
+  gpuWorkloadPlacement:
+    nodeSelector: {}
+    affinity: {}
+    tolerations: []
+
+api:
+  replicas: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+webui:
+  replicas: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+core:
+  replicas: 1
+  env:
+    maxParallelRequests: 100
+    upstreamLlmRequestTimeout: 600
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+
+triton:
+  replicas: 1
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 20Gi
+      gpuCount: 1
+      gpuResourceName: nvidia.com/gpu
+    requests:
+      cpu: 1000m
+      memory: 12Gi
+
+scanners:
+  env:
+    maxScanChars: "5000"
+    maxRpcConcurrency: ""
+
+  defaultResources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+
+  language:
+    replicas: 1
+    env: {}
+
+  code:
+    replicas: 1
+    env: {}
+
+  promptinjection:
+    replicas: 1
+    env:
+      CHUNK_SIZE: "512"
+      CHUNK_OVERLAP_SIZE: "256"
+
+  sensitive:
+    replicas: 1
+    env: {}
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 10Gi
+      requests:
+        cpu: 1000m
+        memory: 6Gi
+
+  toxicity:
+    replicas: 1
+    env:
+      CHUNK_SIZE: "512"
+      CHUNK_OVERLAP_SIZE: "256"
+
+  anonymize:
+    replicas: 1
+    env: {}
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 15Gi
+      requests:
+        cpu: 1000m
+        memory: 6Gi
+
+  deanonymize:
+    replicas: 1
+    env: {}
+
+  customrule:
+    replicas: 1
+    env: {}
+
+license_manager:
+  existingSecret: ""
+  existingSecretKey: license-key
+  placement:
+    nodeSelector: {}
+    affinity: {}
+    tolerations: []
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+logd:
+  replicas: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+storage:
+  size: 8Gi
+  storageClass: ""
+  existingPvName: ""
+  claimName: ""
+
+ingress:
+  className: nginx
+  host: ""
+  annotations: {}
+
+tls:
+  enabled: true
+  mountPath: /etc/tls
+  # Name used when the chart creates the TLS secret.
+  secretName: fortiaigate-tls-secret
+  # If set, the chart will not create a TLS secret and will mount this one instead.
+  existingSecret: ""
+  # Backwards-compatible file-based inputs.
+  cert: files/certificate/dflt.crt
+  key: files/certificate/dflt.key
+  # Inline PEM content. If these are set, they take precedence over `cert` and `key`.
+  certData: ""
+  keyData: ""
+
+license:
+  # If set, the chart will mount this ConfigMap instead of creating one.
+  existingConfigMap: ""
+  # Inline license content. Keys become filenames in /etc/licenses.
+  # In many environments the keys should match Kubernetes node names because
+  # the license-manager container exports NODE_NAME from spec.nodeName.
+  data: {}
+  # File-based license input for backwards compatibility.
+  files: {}
+
+externalDatabase:
+  enabled: false
+  host: ""
+  port: 5432
+  database: fortiaigate_db
+  username: fortiaigate_postgres_user
+  password: ""
+  existingSecret: ""
+  existingSecretKey: password
+  ssl:
+    enabled: true
+    mountPath: /etc/external-database-tls
+    # If set, this secret is mounted so the app can read CA and optional client certs.
+    existingSecret: ""
+    caFilename: ca.crt
+    certFilename: ""
+    keyFilename: ""
+    # Explicit paths override files mounted from existingSecret.
+    certFile: ""
+    keyFile: ""
+    caFile: ""
+
+externalRedis:
+  enabled: false
+  host: ""
+  port: 6379
+  password: ""
+  existingSecret: ""
+  existingSecretKey: redis-password
+  ssl:
+    enabled: true
+    mountPath: /etc/external-redis-tls
+    # If set, this secret is mounted so the app can read CA and optional client certs.
+    existingSecret: ""
+    caFilename: ca.crt
+    certFilename: ""
+    keyFilename: ""
+    # Explicit paths override files mounted from existingSecret.
+    certFile: ""
+    keyFile: ""
+    caFile: ""
+
+postgresql:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 17.4.0-debian-12-r19
+    pullPolicy: IfNotPresent
+  auth:
+    username: fortiaigate_postgres_user
+    database: fortiaigate_db
+  tls:
+    enabled: true
+    certificatesSecret: fortiaigate-tls-secret
+    certFilename: tls.crt
+    certKeyFilename: tls.key
+    preferServerCiphers: true
+  volumePermissions:
+    enabled: true
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/os-shell
+      tag: 12-debian-12-r50
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: ""
+      existingClaim: fortiaigate-storage
+      accessModes:
+        - ReadWriteMany
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 4Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+    service:
+      type: ClusterIP
+      port: 5432
+
+redis:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis
+    tag: 8.2.0-debian-12-r0
+    pullPolicy: IfNotPresent
+  architecture: standalone
+  tls:
+    enabled: true
+    existingSecret: fortiaigate-tls-secret
+    certFilename: tls.crt
+    certKeyFilename: tls.key
+    certCAFilename: tls.crt
+    authClients: false
+  master:
+    persistence:
+      enabled: true
+      size: 4Gi
+      storageClass: ""
+      existingClaim: fortiaigate-storage
+      accessModes:
+        - ReadWriteMany
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+    service:
+      type: ClusterIP
+      port: 6379

@@ -1,0 +1,156 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: license-manager
+  labels:
+    app: license-manager
+    component: license-manager
+    app.kubernetes.io/name: fortiaigate
+    app.kubernetes.io/part-of: fortiaigate-platform
+    app.kubernetes.io/managed-by: helm
+spec:
+  selector:
+    matchLabels:
+      app: license-manager
+      component: license-manager
+  template:
+    metadata:
+      {{- if eq (include "fortiaigate.shouldMountTlsSecret" .) "true" }}
+      annotations:
+        checksum/tls: {{ include "fortiaigate.tlsChecksum" . }}
+      {{- end }}
+      labels:
+        app: license-manager
+        component: license-manager
+    spec:
+      {{- include "fortiaigate.renderPlacement" .Values.license_manager.placement | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: license-manager
+          image: "{{ .Values.fortiaigate.image.repository }}/license_manager:{{ .Values.fortiaigate.image.tag }}"
+          imagePullPolicy: {{ .Values.fortiaigate.image.pullPolicy }}
+          ports:
+            - containerPort: 443
+              name: https
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.license_manager.resources | nindent 12 }}
+          env:
+            - name: FORTIAIGATE_LOG_LEVEL
+              value: {{ .Values.fortiaigate.env.logLevel | quote }}
+            {{- include "fortiaigate.appTlsEnv" . | nindent 12 }}
+            {{- include "fortiaigate.redisEnv" . | nindent 12 }}
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "fortiaigate.fullname" . }}-db-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "fortiaigate.fullname" . }}-db-config
+                  key: REDIS_PORT
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fortiaigate.licenseManagerSecretName" . }}
+                  key: {{ .Values.license_manager.existingSecretKey }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: shared-data
+              mountPath: /etc/fortiaigate/
+            - name: tmp
+              mountPath: /tmp
+            {{- if eq (include "fortiaigate.shouldMountTlsSecret" .) "true" }}
+            - name: tls-certs
+              mountPath: {{ .Values.tls.mountPath | quote }}
+              readOnly: true
+            {{- end }}
+            {{- include "fortiaigate.externalTlsVolumeMounts" . | nindent 12 }}
+            - name: license
+              mountPath: /etc/licenses/
+              readOnly: true
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: {{ include "fortiaigate.storageClaimName" . }}
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          emptyDir:
+            medium: Memory
+            sizeLimit: 128Mi
+        {{- if eq (include "fortiaigate.shouldMountTlsSecret" .) "true" }}
+        - name: tls-certs
+          secret:
+            secretName: {{ include "fortiaigate.tlsSecretName" . }}
+        {{- end }}
+        {{- include "fortiaigate.externalTlsVolumes" . | nindent 8 }}
+        - name: license
+          configMap:
+            name: {{ include "fortiaigate.licenseConfigMapName" . }}
+      {{- with .Values.fortiaigate.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+{{- if not .Values.license_manager.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "fortiaigate.licenseManagerSecretName" . }}
+  labels:
+    app: license-manager
+    app.kubernetes.io/name: fortiaigate
+    app.kubernetes.io/part-of: fortiaigate-platform
+    app.kubernetes.io/managed-by: helm
+  annotations:
+    "helm.sh/resource-policy": keep
+type: Opaque
+data:
+  {{- $secretName := include "fortiaigate.licenseManagerSecretName" . }}
+  {{- $secretObj := (lookup "v1" "Secret" .Release.Namespace $secretName) | default dict }}
+  {{- $secretData := (get $secretObj "data") | default dict }}
+  {{- $licenseKey := (get $secretData .Values.license_manager.existingSecretKey) | default (randAlphaNum 32 | b64enc) }}
+  {{ .Values.license_manager.existingSecretKey }}: {{ $licenseKey | quote }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: license-manager
+  labels:
+    app: license-manager
+    component: license-manager
+    app.kubernetes.io/name: fortiaigate
+    app.kubernetes.io/part-of: fortiaigate-platform
+    app.kubernetes.io/managed-by: helm
+spec:
+  selector:
+    app: license-manager
+    component: license-manager
+  ports:
+    - protocol: TCP
+      port: 9000
+      targetPort: 9000
+      name: http
+    - protocol: TCP
+      port: 9443
+      targetPort: 9443
+      name: https
+  internalTrafficPolicy: Local

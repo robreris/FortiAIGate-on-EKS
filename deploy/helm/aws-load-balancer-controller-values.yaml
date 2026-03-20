@@ -1,0 +1,10 @@
+# Update these values to match your cluster before installation.
+clusterName: fortiaigate-eks
+region: us-west-2
+vpcId: vpc-REPLACE_ME
+
+serviceAccount:
+  create: false
+  name: aws-load-balancer-controller
+
+replicaCount: 2

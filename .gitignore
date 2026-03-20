@@ -1,0 +1,58 @@
+# Large vendor artifacts
+*.tar
+*.tar.gz
+*.tgz
+*.img
+*.iso
+
+# Helm package output
+*.tgz
+*.prov
+
+# Certificates, keys, and local secret material
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+*.csr
+*.srl
+
+# License files
+*.lic
+*.license
+
+# Local env and AWS credential helpers
+.env
+.env.*
+*.local
+*.local.yaml
+*.local.yml
+*.local.json
+*.tfvars
+*.tfvars.json
+
+# kube and render output
+*.kubeconfig
+rendered-*.yaml
+*.rendered.yaml
+helm-template*.yaml
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python cache if helper scripts are used locally
+__pycache__/
+*.pyc
+
+# Keep local-injected chart files and manifests out of Git
+fortiaigate/files/certificate/
+fortiaigate/files/licenses/
+deploy/local/

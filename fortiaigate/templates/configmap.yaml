@@ -1,0 +1,22 @@
+{{- if and (not .Values.externalDatabase.enabled) (not .Values.postgresql.enabled) -}}
+{{- fail "Either externalDatabase.enabled or postgresql.enabled must be true" -}}
+{{- end }}
+{{- if and (not .Values.externalRedis.enabled) (not .Values.redis.enabled) -}}
+{{- fail "Either externalRedis.enabled or redis.enabled must be true" -}}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "fortiaigate.fullname" . }}-db-config
+  labels:
+    {{- include "fortiaigate.labels" . | nindent 4 }}
+data:
+  POSTGRES_DB: {{ ternary .Values.externalDatabase.database .Values.postgresql.auth.database .Values.externalDatabase.enabled | quote }}
+  POSTGRES_USER: {{ ternary .Values.externalDatabase.username .Values.postgresql.auth.username .Values.externalDatabase.enabled | quote }}
+  POSTGRES_HOST: {{ ternary .Values.externalDatabase.host (printf "%s-postgresql" .Release.Name) .Values.externalDatabase.enabled | quote }}
+  POSTGRES_PORT: {{ ternary (.Values.externalDatabase.port | toString) (.Values.postgresql.primary.service.port | toString) .Values.externalDatabase.enabled | quote }}
+  REDIS_HOST: {{ ternary .Values.externalRedis.host (printf "%s-redis-master" .Release.Name) .Values.externalRedis.enabled | quote }}
+  REDIS_PORT: {{ ternary (.Values.externalRedis.port | toString) (.Values.redis.master.service.port | toString) .Values.externalRedis.enabled | quote }}
+  DB_POOL_SIZE: "10"
+  DB_MAX_OVERFLOW: "20"
+  REDIS_POOL_SIZE: "10"
