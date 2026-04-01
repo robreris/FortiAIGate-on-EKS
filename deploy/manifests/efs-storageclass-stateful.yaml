@@ -1,0 +1,18 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc-stateful
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap
+  fileSystemId: fs-0a8f4d56f218f652b
+  basePath: /fortiaigate-stateful
+  directoryPerms: "755"
+  # Bitnami PostgreSQL and Redis run as UID/GID 1001. Without explicit uid/gid,
+  # the EFS CSI driver allocates arbitrary access point owners (for example
+  # 50000+), which leaves the volume root unwritable for these containers.
+  uid: "1001"
+  gid: "1001"
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true

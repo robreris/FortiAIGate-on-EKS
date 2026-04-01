@@ -1,7 +1,7 @@
 # Update these values to match your cluster before installation.
 clusterName: fortiaigate-eks
-region: us-west-2
-vpcId: vpc-REPLACE_ME
+region: us-east-1
+vpcId: vpc-05521470b77d5955a
 
 serviceAccount:
   create: false

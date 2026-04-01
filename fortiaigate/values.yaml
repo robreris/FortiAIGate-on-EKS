@@ -177,6 +177,7 @@ storage:
   claimName: ""
 
 ingress:
+  enabled: false
   className: nginx
   host: ""
   annotations: {}

@@ -4,17 +4,9 @@ metadata:
   name: fortiaigate-license-config
   namespace: fortiaigate
 data:
-  # Replace these keys with the real Kubernetes node names from:
+  # Replace this key with the real Kubernetes node name from:
   # kubectl get nodes -o custom-columns=NAME:.metadata.name
   ip-10-0-1-10.us-west-2.compute.internal: |
     -----BEGIN FORTIAIGATE LICENSE-----
     REPLACE_WITH_LICENSE_FOR_APP_NODE_1
-    -----END FORTIAIGATE LICENSE-----
-  ip-10-0-2-10.us-west-2.compute.internal: |
-    -----BEGIN FORTIAIGATE LICENSE-----
-    REPLACE_WITH_LICENSE_FOR_APP_NODE_2
-    -----END FORTIAIGATE LICENSE-----
-  ip-10-0-3-10.us-west-2.compute.internal: |
-    -----BEGIN FORTIAIGATE LICENSE-----
-    REPLACE_WITH_LICENSE_FOR_GPU_NODE_1
     -----END FORTIAIGATE LICENSE-----

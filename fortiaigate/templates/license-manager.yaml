@@ -41,6 +41,10 @@ spec:
           env:
             - name: FORTIAIGATE_LOG_LEVEL
               value: {{ .Values.fortiaigate.env.logLevel | quote }}
+            # license-manager's Redis client uses Python's default CA lookup.
+            # Point it at the shared in-cluster self-signed CA bundle.
+            - name: SSL_CERT_FILE
+              value: {{ printf "%s/tls.crt" .Values.tls.mountPath | quote }}
             {{- include "fortiaigate.appTlsEnv" . | nindent 12 }}
             {{- include "fortiaigate.redisEnv" . | nindent 12 }}
             - name: REDIS_HOST

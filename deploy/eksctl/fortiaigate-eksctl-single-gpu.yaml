@@ -10,19 +10,19 @@ iam:
   withOIDC: true
 
 managedNodeGroups:
-  - name: fortiaigate-app-ng
+  - name: fortiaigate-gpu-app-ng
     amiFamily: AmazonLinux2023
-    instanceType: m7i.4xlarge
+    instanceType: g5.4xlarge
     desiredCapacity: 1
     minSize: 1
     maxSize: 1
-    volumeSize: 120
+    volumeSize: 350
     privateNetworking: true
     labels:
       fortiaigate-role: app
+      accelerator: nvidia
     tags:
-      Name: fortiaigate-eks-app-ng
-
+      Name: fortiaigate-eks-gpu-app-ng
 
 addons:
   - name: vpc-cni
@@ -33,7 +33,7 @@ addons:
       - arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy
 
 # Notes:
-# - Single-node layout for a single FortiAIGate license.
-# - GPU node group removed; gpu.enabled is false in values-eks.yaml so Triton is not deployed.
-# - The app node holds all FortiAIGate CPU services plus bundled PostgreSQL and Redis.
+# - Single-node layout for one FortiAIGate license with Triton/scanners enabled.
+# - The node is GPU-backed so Triton can run locally with the rest of the stack.
+# - Keep the node count fixed at 1 so the license ConfigMap only needs one node key.
 # - The AWS Load Balancer Controller IAM service account is installed after cluster creation; see README.md.

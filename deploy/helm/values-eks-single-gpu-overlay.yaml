@@ -1,0 +1,15 @@
+# Single-node GPU test overlay — applied on top of values-eks.yaml by
+# helm-install-test-gpu.
+#
+# This keeps the deployment at one licensed node while enabling Triton-backed
+# scanners. CPU services and Triton both land on the same GPU-capable node.
+
+fortiaigate:
+  gpu:
+    enabled: true
+
+  gpuWorkloadPlacement:
+    nodeSelector:
+      fortiaigate-role: app
+    affinity: {}
+    tolerations: []

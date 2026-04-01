@@ -1,3 +1,4 @@
+{{- if .Values.fortiaigate.gpu.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -249,15 +250,72 @@ data:
     name: "toxicity_model"
     platform: "onnxruntime_onnx"
     max_batch_size: 16
+    model_repository_agents
+    {
+      agents [
+        {
+          name: "agent"
+          parameters [
+            {
+              key: "inference_mode"
+              value: "true"
+            }
+          ]
+        }
+      ]
+    }
   sensitive_model-config.pbtxt: |
     name: "sensitive_model"
     platform: "onnxruntime_onnx"
     max_batch_size: 16
+    model_repository_agents
+    {
+      agents [
+        {
+          name: "agent"
+          parameters [
+            {
+              key: "inference_mode"
+              value: "true"
+            }
+          ]
+        }
+      ]
+    }
   language_model-config.pbtxt: |
     name: "language_model"
     platform: "onnxruntime_onnx"
     max_batch_size: 16
+    model_repository_agents
+    {
+      agents [
+        {
+          name: "agent"
+          parameters [
+            {
+              key: "inference_mode"
+              value: "true"
+            }
+          ]
+        }
+      ]
+    }
   code_model-config.pbtxt: |
     name: "code_model"
     platform: "onnxruntime_onnx"
     max_batch_size: 16
+    model_repository_agents
+    {
+      agents [
+        {
+          name: "agent"
+          parameters [
+            {
+              key: "inference_mode"
+              value: "true"
+            }
+          ]
+        }
+      ]
+    }
+{{- end }}

@@ -1,0 +1,59 @@
+# Full-setup overlay — applied on top of values-eks.yaml by helm-install-full.
+#
+# The Makefile substitutes REPLACE_HOST and REPLACE_ACM_ARN before passing this
+# file to Helm. You can also fill them in directly and run helm upgrade manually:
+#
+#   helm upgrade --install fortiaigate ./fortiaigate \
+#     --namespace fortiaigate \
+#     -f deploy/helm/values-eks.yaml \
+#     -f deploy/helm/values-eks-full-overlay.yaml
+
+fortiaigate:
+  gpu:
+    enabled: true
+
+  # Triton lands on GPU nodes only.
+  gpuWorkloadPlacement:
+    nodeSelector:
+      fortiaigate-role: gpu
+    affinity: {}
+    tolerations:
+      - key: fortiaigate-gpu
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+license_manager:
+  # DaemonSet must reach every node that runs FortiAIGate workloads.
+  placement:
+    nodeSelector: {}
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: fortiaigate-role
+                  operator: In
+                  values:
+                    - app
+                    - gpu
+    tolerations:
+      - key: fortiaigate-gpu
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+ingress:
+  enabled: true
+  className: alb
+  host: REPLACE_HOST
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/backend-protocol: HTTPS
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTPS
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: REPLACE_ACM_ARN

@@ -5,13 +5,13 @@ fullnameOverride: fortiaigate
 
 fortiaigate:
   image:
-    repository: 123456789012.dkr.ecr.us-west-2.amazonaws.com/fortiaigate
+    repository: 228122752878.dkr.ecr.us-east-1.amazonaws.com/fortiaigate
     tag: V8.0.0-build0021
     pullPolicy: IfNotPresent
     pullSecrets: []
 
   gpu:
-    enabled: true
+    enabled: false
 
   # Single-GPU deployments should avoid RollingUpdate for Triton.
   updateStrategy: Recreate
@@ -27,36 +27,13 @@ fortiaigate:
     affinity: {}
     tolerations: []
 
-  # Only Triton should land on the GPU node group.
-  gpuWorkloadPlacement:
-    nodeSelector:
-      fortiaigate-role: gpu
-    affinity: {}
-    tolerations:
-      - key: fortiaigate-gpu
-        operator: Equal
-        value: "true"
-        effect: NoSchedule
-
 license_manager:
   # The DaemonSet needs a pod on every node that might run FortiAIGate workloads.
   placement:
-    nodeSelector: {}
-    affinity:
-      nodeAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          nodeSelectorTerms:
-            - matchExpressions:
-                - key: fortiaigate-role
-                  operator: In
-                  values:
-                    - app
-                    - gpu
-    tolerations:
-      - key: fortiaigate-gpu
-        operator: Equal
-        value: "true"
-        effect: NoSchedule
+    nodeSelector:
+      fortiaigate-role: app
+    affinity: {}
+    tolerations: []
 
 storage:
   size: 100Gi
@@ -65,18 +42,24 @@ storage:
   claimName: fortiaigate-storage
 
 ingress:
-  className: alb
+  enabled: false   # use kubectl port-forward for initial testing; set true when an IngressClass is available
+  className: nginx
   host: fortiaigate.example.com
-  annotations:
-    kubernetes.io/ingress.class: alb
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/backend-protocol: HTTPS
-    alb.ingress.kubernetes.io/healthcheck-protocol: HTTPS
-    alb.ingress.kubernetes.io/healthcheck-path: /
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:123456789012:certificate/REPLACE_ME
+  annotations: {}
+
+#ingress:
+#  className: alb
+#  host: fortiaigate.example.com
+#  annotations:
+#    kubernetes.io/ingress.class: alb
+#    alb.ingress.kubernetes.io/scheme: internet-facing
+#    alb.ingress.kubernetes.io/target-type: ip
+#    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+#    alb.ingress.kubernetes.io/backend-protocol: HTTPS
+#    alb.ingress.kubernetes.io/healthcheck-protocol: HTTPS
+#    alb.ingress.kubernetes.io/healthcheck-path: /
+#    alb.ingress.kubernetes.io/ssl-redirect: "443"
+#    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:123456789012:certificate/REPLACE_ME
 
 tls:
   enabled: true
@@ -101,15 +84,36 @@ postgresql:
     certFilename: tls.crt
     certKeyFilename: tls.key
     preferServerCiphers: true
+  # EFS access points enforce directory permissions via directoryPerms/gidRange in
+  # the StorageClass. The volumePermissions init container runs chown as root,
+  # which EFS squashes — disable it.
+  volumePermissions:
+    enabled: false
   primary:
     nodeSelector:
       fortiaigate-role: app
+    # Explicit affinity prevents the subchart from falling back to the
+    # global.licenses hostname affinity, which produces an empty values list.
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: fortiaigate-role
+                  operator: In
+                  values:
+                    - app
     persistence:
       enabled: true
-      storageClass: efs-sc
-      existingClaim: fortiaigate-storage
+      # Clear the chart default shared PVC; PostgreSQL needs its own claim.
+      existingClaim: ""
+      # efs-sc-stateful has no POSIX UID enforcement so files are owned by
+      # the container's actual UID (1001). efs-sc enforces UID 10001 which
+      # causes initdb to fail its ownership check.
+      storageClass: efs-sc-stateful
+      size: 20Gi
       accessModes:
-        - ReadWriteMany
+        - ReadWriteOnce
 
 redis:
   enabled: true
@@ -129,12 +133,25 @@ redis:
   master:
     nodeSelector:
       fortiaigate-role: app
+    # Explicit affinity prevents the subchart from falling back to the
+    # global.licenses hostname affinity, which produces an empty values list.
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: fortiaigate-role
+                  operator: In
+                  values:
+                    - app
     persistence:
       enabled: true
-      storageClass: efs-sc
-      existingClaim: fortiaigate-storage
+      # Clear the chart default shared PVC; Redis needs its own claim.
+      existingClaim: ""
+      storageClass: efs-sc-stateful
+      size: 8Gi
       accessModes:
-        - ReadWriteMany
+        - ReadWriteOnce
 
 # Optional: move stateful dependencies out of the cluster.
 # If you enable either of these blocks, disable the bundled dependency too.

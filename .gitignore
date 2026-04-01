@@ -1,3 +1,7 @@
+.codex
+.kuberlr
+openai-key
+
 # Large vendor artifacts
 *.tar
 *.tar.gz

@@ -5,7 +5,7 @@ metadata:
 provisioner: efs.csi.aws.com
 parameters:
   provisioningMode: efs-ap
-  fileSystemId: fs-REPLACE_ME
+  fileSystemId: fs-08095d7042337a8d7
   basePath: /fortiaigate
   directoryPerms: "770"
   gidRangeStart: "10001"
