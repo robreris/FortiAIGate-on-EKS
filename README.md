@@ -8,6 +8,8 @@ This guidance is based on local inspection of the files in this directory and AW
 
 ### Product image archives
 
+The latest images can be found at: [FortiAIGate Image Downloads](https://info.fortinet.com/builds/?project_id=807)
+
 These tar files are saved OCI or Docker image archives:
 
 | File | Image inside archive | Notes |
