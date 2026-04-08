@@ -35,5 +35,5 @@ addons:
 # Notes:
 # - Single-node layout for one FortiAIGate license with Triton/scanners enabled.
 # - The node is GPU-backed so Triton can run locally with the rest of the stack.
-# - Keep the node count fixed at 1 so the license ConfigMap only needs one node key.
+# - Single node confirmed working with one license entry keyed to the node name.
 # - The AWS Load Balancer Controller IAM service account is installed after cluster creation; see README.md.

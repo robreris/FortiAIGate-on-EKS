@@ -52,5 +52,5 @@ addons:
 # Notes:
 # - Full layout: 2 app nodes for FortiAIGate CPU services + 1 GPU node for Triton.
 # - The GPU node group is tainted so only workloads that explicitly tolerate it land there.
-# - Keep node counts fixed until licensing behavior is confirmed (one license file per node).
+# - Deploying with a single license entry tests whether per-node enforcement applies; check license-manager logs.
 # - The AWS Load Balancer Controller IAM service account is installed after cluster creation.

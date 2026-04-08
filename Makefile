@@ -96,7 +96,7 @@ help:
 	@printf '\nSecrets and config:\n'
 	@printf '  tls-self-signed      Generate self-signed cert and create K8s TLS secret\n'
 	@printf '  tls-from-files       Create K8s TLS secret from TLS_CERT / TLS_KEY files\n'
-	@printf '  license-configmap    Create license ConfigMap keyed to the auto-detected node name\n'
+	@printf '  license-configmap    Create license ConfigMap keyed to first auto-detected node name\n'
 	@printf '\nHelm:\n'
 	@printf '  helm-render          Dry-run render to /tmp/fortiaigate-render.yaml\n'
 	@printf '  helm-render-test-gpu Dry-run render to /tmp/fortiaigate-render-test-gpu.yaml\n'

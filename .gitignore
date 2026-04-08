@@ -1,6 +1,7 @@
 .codex
 .kuberlr
 openai-key
+licensing-analysis.md
 
 # Large vendor artifacts
 *.tar
