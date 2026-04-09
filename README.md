@@ -157,15 +157,15 @@ External HTTPS is handled separately by ACM at the ALB edge and is only needed w
 
 Use this order for the first end-to-end test:
 
-1. Update [fortiaigate-eksctl.yaml](/home/robert/cFOS/FortiAIGate/images/deploy/eksctl/fortiaigate-eksctl.yaml) with your Region, cluster name, and preferred instance sizes.
+1. Update [fortiaigate-eksctl.yaml](deploy/eksctl/fortiaigate-eksctl.yaml) with your Region, cluster name, and preferred instance sizes.
 2. Create the EKS cluster with `eksctl create cluster -f deploy/eksctl/fortiaigate-eksctl.yaml`.
 3. Create the ECR repositories, `docker load` the FortiAIGate image archives, retag them, and push them to ECR.
-4. Install the AWS Load Balancer Controller using [aws-load-balancer-controller-values.yaml](/home/robert/cFOS/FortiAIGate/images/deploy/helm/aws-load-balancer-controller-values.yaml).
-5. Create EFS, update [efs-storageclass.yaml](/home/robert/cFOS/FortiAIGate/images/deploy/manifests/efs-storageclass.yaml) with the real file system ID, and apply the namespace and StorageClass manifests.
+4. Install the AWS Load Balancer Controller using [aws-load-balancer-controller-values.yaml](deploy/helm/aws-load-balancer-controller-values.yaml).
+5. Create EFS, update [efs-storageclass.yaml](deploy/manifests/efs-storageclass.yaml) with the real file system ID, and apply the namespace and StorageClass manifests.
 6. Get the real node names with `kubectl get nodes -o custom-columns=NAME:.metadata.name` and build the license ConfigMap from those names.
 7. Create the FortiAIGate TLS Secret and license ConfigMap.
-8. Update [values-eks.yaml](/home/robert/cFOS/FortiAIGate/images/deploy/helm/values-eks.yaml) with your ECR prefix, hostname, and ACM certificate ARN.
-9. If you want RDS and ElastiCache for the first test, also apply [fortiaigate-external-postgres.yaml](/home/robert/cFOS/FortiAIGate/images/deploy/manifests/fortiaigate-external-postgres.yaml), [fortiaigate-external-redis.yaml](/home/robert/cFOS/FortiAIGate/images/deploy/manifests/fortiaigate-external-redis.yaml), and install with [values-eks-external-services.yaml](/home/robert/cFOS/FortiAIGate/images/deploy/helm/values-eks-external-services.yaml).
+8. Update [values-eks.yaml](deploy/helm/values-eks.yaml) with your ECR prefix, hostname, and ACM certificate ARN.
+9. If you want RDS and ElastiCache for the first test, also apply [fortiaigate-external-postgres.yaml](deploy/manifests/fortiaigate-external-postgres.yaml), [fortiaigate-external-redis.yaml](deploy/manifests/fortiaigate-external-redis.yaml), and install with [values-eks-external-services.yaml](deploy/helm/values-eks-external-services.yaml).
 10. Run a final dry render with `helm template`, then install with `helm upgrade --install`.
 11. Validate pod placement, PVC binding, ALB creation, and license-manager behavior before changing node counts.
 
