@@ -410,19 +410,19 @@ namespace:
 
 # ── TLS ───────────────────────────────────────────────────────────────────────
 tls-self-signed:
-	@mkdir -p deploy/tls
+	@mkdir -p certs
 	openssl req -x509 -newkey rsa:4096 -nodes \
-	  -keyout deploy/tls/tls.key \
-	  -out deploy/tls/tls.crt \
+	  -keyout $(TLS_KEY) \
+	  -out $(TLS_CERT) \
 	  -days 3650 \
 	  -subj "/CN=fortiaigate.$(NAMESPACE).svc.cluster.local" \
 	  -addext "subjectAltName=DNS:fortiaigate,DNS:fortiaigate.$(NAMESPACE).svc.cluster.local,DNS:localhost"
 	kubectl create secret tls fortiaigate-tls-secret \
 	  --namespace "$(NAMESPACE)" \
-	  --cert deploy/tls/tls.crt \
-	  --key deploy/tls/tls.key \
+	  --cert $(TLS_CERT) \
+	  --key $(TLS_KEY) \
 	  --dry-run=client -o yaml | kubectl apply -f -
-	@printf '\nTLS secret created. Files are in deploy/tls/ — do not commit them.\n'
+	@printf '\nTLS secret created. Files are in certs/ — do not commit them.\n'
 
 tls-from-files:
 	@test -f "$(TLS_CERT)" || (echo "ERROR: TLS_CERT not found: $(TLS_CERT)"; exit 1)

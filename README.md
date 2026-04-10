@@ -236,7 +236,7 @@ Override any of these on the command line:
 | `AWS_ACCOUNT_ID` | Auto-detected via `aws sts` | |
 | `ACM_CERT_ARN` | *(none)* | Required for `deploy-full` |
 | `INGRESS_HOST` | `fortiaigate.example.com` | Required for `deploy-full` |
-| `TLS_CERT` / `TLS_KEY` | `deploy/tls/tls.crt` / `deploy/tls/tls.key` | Used by `tls-from-files` |
+| `TLS_CERT` / `TLS_KEY` | `certs/tls.crt` / `certs/tls.key` | Used by `tls-from-files` |
 
 ### Individual step targets
 
@@ -276,11 +276,7 @@ All steps in the composite targets can be run on their own:
 
 - **`deploy-test-gpu` is the simplest scanner-enabled shape.** It keeps the cluster at one GPU-backed node and schedules Triton onto that same node so scanner traffic can resolve `triton-server` without adding another licensed node.
 
-- **`deploy/tls/` should not be committed.** Add it to `.gitignore`:
-
-  ```
-  deploy/tls/
-  ```
+- **`certs/` should not be committed.** It is already covered by `.gitignore`.
 
 - **Whether the full setup requires 3 licenses is unconfirmed.** The `license-configmap` target creates a ConfigMap entry only for the first node detected — the remaining `license-manager` pods will log whether a single license is sufficient or whether per-node enforcement applies. See the [Licensing](#licensing) section for details.
 

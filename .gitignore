@@ -61,3 +61,8 @@ __pycache__/
 fortiaigate/files/certificate/
 fortiaigate/files/licenses/
 deploy/local/
+deploy/tls/
+certs/
+
+# Secret manifests with embedded TLS material
+deploy/manifests/fortiaigate-tls-secret.yaml
