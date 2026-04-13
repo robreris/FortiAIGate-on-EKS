@@ -31,10 +31,10 @@ configuring `externalDatabase`.
 ## Redis
 
 Used by the **core**, **api**, **logd**, and **license-manager** services.
-The license-manager is the only component that uses Redis but *not* Postgres,
-suggesting Redis carries distributed coordination state — likely license token
-presence/validity across nodes — in addition to whatever caching or job-queue
-duties it serves for the other three services.
+The license-manager is the only component that uses Redis but *not* Postgres.
+Given that licensing is per-node, Redis is most likely used by the license-manager
+as a local fast-path cache for validated license state (avoiding repeated file reads),
+in addition to whatever caching or job-queue duties it serves for the other three services.
 
 Deployed as the Bitnami Redis subchart (standalone) with TLS enabled.
 On EKS it uses its own `ReadWriteOnce` PVC backed by `efs-sc-stateful` (8 Gi).

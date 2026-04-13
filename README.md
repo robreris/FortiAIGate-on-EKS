@@ -107,16 +107,15 @@ Use this layout for the initial deployment:
 
 `license-manager` runs as a DaemonSet. Each pod receives `NODE_NAME` (the Kubernetes node name) via the downward API and has the entire license ConfigMap mounted at `/etc/licenses/`. The ConfigMap keys are node names and the values are license file content.
 
-The `fortiaigate-role: app` label controls which nodes get a `license-manager` pod. Whether that pod activates depends on what it finds in `/etc/licenses/` — specifically, whether it looks up the file by `NODE_NAME` or reads any file present. This is the core open question.
+The `fortiaigate-role: app` label controls which nodes get a `license-manager` pod. Each pod looks up the file in `/etc/licenses/` by its own `NODE_NAME` — licensing is per-node. Every node that runs FortiAIGate workloads must have a matching entry in the license ConfigMap.
 
-What is confirmed from runtime vs. what is still unverified:
-
-| Confirmed (from runtime) | Unverified |
-| --- | --- |
-| `license-manager` is a DaemonSet | Whether file lookup is keyed by `NODE_NAME` (per-node) or cluster-scoped |
-| `NODE_NAME` is injected from `spec.nodeName` | Whether a single license activates on all nodes simultaneously |
-| A ConfigMap key matching the node name activates the license (`License status: Active`) | Whether nodes without a matching ConfigMap key error, idle, or activate via Redis |
-| Node name appears in log context: `[ip-192-168-73-159.ec2.internal] License status changed to Active` | |
+| Confirmed |
+| --- |
+| `license-manager` is a DaemonSet |
+| `NODE_NAME` is injected from `spec.nodeName` |
+| A ConfigMap key matching the node name activates the license (`License status: Active`) |
+| Node name appears in log context: `[ip-192-168-73-159.ec2.internal] License status changed to Active` |
+| Licensing is per-node: one license required per node (Fortinet-confirmed 2026-04-13) |
 
 Check the license-manager logs after any deployment:
 
@@ -126,15 +125,11 @@ kubectl logs -n fortiaigate daemonset/license-manager
 
 ### How many licenses you need
 
-The minimum confirmed working setup is **1 license on 1 node**:
+**One license per node.** Every node that runs FortiAIGate workloads must have its own license file, with a ConfigMap entry keyed to the node's Kubernetes node name.
 
-- 1 GPU-backed node (`fortiaigate-eksctl-single-gpu.yaml`), labeled `fortiaigate-role: app`
-- Triton enabled via `values-eks-single-gpu-overlay.yaml`
-- License ConfigMap keyed to the single node name → `License status: Active`
+For the single-node GPU test (`fortiaigate-eksctl-single-gpu.yaml`), one license is sufficient because all services — CPU workloads and Triton — run on the same node. For the full cluster (`fortiaigate-eksctl-full.yaml`, 2 app nodes + 1 GPU node), three licenses are required: one per app node and one for the GPU node.
 
-This mirrors the original Fortinet chart design, which put all workloads (including Triton) on the same licensed nodes with no CPU/GPU separation.
-
-Whether a single license is sufficient for a multi-node cluster is unconfirmed. The full cluster (`fortiaigate-eksctl-full.yaml`, 2 app + 1 GPU nodes) can be deployed with a single ConfigMap entry to test this. Note that the `license-configmap` Makefile target only creates an entry for the first node returned by `kubectl get nodes` — the remaining `license-manager` pods will find no matching key, and their logs will show whether they error, idle, or activate regardless.
+The `license-configmap` Makefile target creates an entry only for the first node detected — for multi-node clusters you must add the remaining entries manually before deploying.
 
 If a node is replaced and its name changes, update the ConfigMap key and restart the `license-manager` DaemonSet pod on that node.
 
@@ -278,7 +273,7 @@ All steps in the composite targets can be run on their own:
 
 - **`certs/` should not be committed.** It is already covered by `.gitignore`.
 
-- **Whether the full setup requires 3 licenses is unconfirmed.** The `license-configmap` target creates a ConfigMap entry only for the first node detected — the remaining `license-manager` pods will log whether a single license is sufficient or whether per-node enforcement applies. See the [Licensing](#licensing) section for details.
+- **The full setup requires 3 licenses (one per node).** The `license-configmap` target creates a ConfigMap entry only for the first node detected. For multi-node clusters, add entries for each remaining node before deploying. See the [Licensing](#licensing) section for details.
 
 ## Step 1: Review The `eksctl` Cluster Config
 
@@ -565,7 +560,7 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name
 
 The ConfigMap keys are Kubernetes node names and the values are license file content. Every node running FortiAIGate workloads must also run a `license-manager` pod — the license-manager Service uses `internalTrafficPolicy: Local`, so traffic only reaches a pod on the same node. Keep `license_manager.placement` wide enough to cover every node that runs FortiAIGate pods.
 
-Whether a single license activates the whole cluster or each node requires its own file is unconfirmed — see [Licensing](#licensing).
+Licensing is per-node: each node requires its own license file. See [Licensing](#licensing).
 
 ## Step 7: Review Helm Values
 
@@ -873,8 +868,8 @@ Operational note:
 
 ## Remaining Risks And Assumptions
 
-1. Per-node license enforcement is still unconfirmed.
-   Whether a single license activates the whole cluster or each node requires its own file is unknown. The full-cluster test (2 app + 1 GPU, single license entry) resolves this. See [Licensing](#licensing).
+1. Node count drives license count.
+   Licensing is per-node (one license per node). The full cluster (2 app + 1 GPU) requires 3 licenses. Ensure the license ConfigMap has an entry for every node before deploying. See [Licensing](#licensing).
 
 2. Node replacement invalidates the ConfigMap key.
    If a node is replaced and its name changes, the ConfigMap key will no longer match and that node will be unlicensed. Update the ConfigMap and restart the `license-manager` pod on that node after any replacement.

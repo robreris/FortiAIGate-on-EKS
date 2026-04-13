@@ -57,10 +57,9 @@ Internet                |   App Node Group (fortiaigate-role: app)         |
 CPU services run on the app node group and Triton is isolated to a dedicated GPU node
 group (tainted `fortiaigate-gpu=true:NoSchedule`). The license-manager DaemonSet spans
 both groups. An internet-facing ALB with an ACM certificate provides public HTTPS access
-with the same `/api/`, `/v1/`, `/*` path routing that the local proxy mimics. License
-activation is keyed to the Kubernetes node name via the ConfigMap, but whether per-node
-enforcement applies (i.e., one license per node) is unconfirmed — see the Licensing
-section in README.md.
+with the same `/api/`, `/v1/`, `/*` path routing that the local proxy mimics. Licensing is per-node: one license is required per node. License activation is keyed to
+the Kubernetes node name via the ConfigMap — each node must have a matching ConfigMap entry
+with its own valid license file.
 
 ---
 
