@@ -1,0 +1,138 @@
+# EKS base values for build0024 (multi-node deployment).
+# Apply this file to every helm install; add the full overlay on top for ALB ingress and GPU.
+#
+# global.licenses must be populated with actual node names before helm install.
+# Run  make license-values  to generate /tmp/fortiaigate-licenses.yaml from the live cluster,
+# then pass it to helm alongside this file:
+#
+#   helm upgrade --install fortiaigate ./fortiaigate \
+#     --namespace fortiaigate \
+#     -f values-eks.yaml \
+#     -f /tmp/fortiaigate-licenses.yaml \
+#     [-f values-eks-full-overlay.yaml]
+
+fullnameOverride: fortiaigate
+
+global:
+  security:
+    allowInsecureImages: true
+  # global.licenses is intentionally empty here.
+  # It is generated at deploy time by `make license-values` and passed as a
+  # separate values file so node names are not hardcoded in this file.
+  licenses: {}
+
+fortiaigate:
+  image:
+    repository: REPLACE_WITH_ECR_PREFIX
+    tag: V8.0.0-build0024
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+
+  gpu:
+    enabled: false  # set true in full overlay
+
+  # Recreate avoids the GPU resource deadlock during upgrades on single-GPU nodes.
+  # Switch to RollingUpdate if you have spare GPU capacity.
+  updateStrategy: Recreate
+
+  env:
+    logLevel: INFO
+
+license:
+  existingConfigMap: fortiaigate-license-config
+
+tls:
+  enabled: true
+  existingSecret: fortiaigate-tls-secret
+
+ingress:
+  # Disabled for port-forward based testing; enabled in the full overlay.
+  className: alb
+  host: ""
+  annotations: {}
+
+storage:
+  size: 100Gi
+  storageClass: efs-sc
+  existingPvName: ""
+
+postgresql:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 17.4.0-debian-12-r19
+    pullPolicy: IfNotPresent
+  auth:
+    username: fortiaigate_postgres_user
+    database: fortiaigate_db
+  tls:
+    enabled: true
+    certificatesSecret: fortiaigate-tls-secret
+    certFilename: tls.crt
+    certKeyFilename: tls.key
+    preferServerCiphers: true
+  # EFS access points enforce ownership at the access-point level (uid/gid 1001
+  # set on efs-sc-stateful). The volumePermissions chown runs as root which EFS
+  # squashes — disable it to prevent a misleading init-container failure.
+  volumePermissions:
+    enabled: false
+  primary:
+    # Pin PostgreSQL to app nodes so it does not land on the GPU node.
+    nodeSelector:
+      fortiaigate-role: app
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: fortiaigate-role
+                  operator: In
+                  values:
+                    - app
+    persistence:
+      enabled: true
+      # Clear the chart default (shared PVC). PostgreSQL gets its own PVC backed
+      # by efs-sc-stateful, which enforces uid/gid 1001 at the access-point level
+      # so PostgreSQL can own its data directory without needing chown.
+      existingClaim: ""
+      storageClass: efs-sc-stateful
+      size: 20Gi
+      accessModes:
+        - ReadWriteOnce
+
+redis:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis
+    tag: 8.2.0-debian-12-r0
+    pullPolicy: IfNotPresent
+  architecture: standalone
+  tls:
+    enabled: true
+    existingSecret: fortiaigate-tls-secret
+    certFilename: tls.crt
+    certKeyFilename: tls.key
+    certCAFilename: tls.crt
+    authClients: false
+  master:
+    # Pin Redis to app nodes so it does not land on the GPU node.
+    nodeSelector:
+      fortiaigate-role: app
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: fortiaigate-role
+                  operator: In
+                  values:
+                    - app
+    persistence:
+      enabled: true
+      existingClaim: ""
+      storageClass: efs-sc-stateful
+      size: 8Gi
+      accessModes:
+        - ReadWriteOnce

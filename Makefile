@@ -2,6 +2,10 @@
 # FortiAIGate EKS Deployment
 # =============================================================================
 #
+# Select a build with BUILD=<build> (default: build0024):
+#   BUILD=build0021  — single-node (legacy)
+#   BUILD=build0024  — multi-node
+#
 # Test setup  — 1 app node, self-signed TLS, kubectl port-forward access:
 #   make deploy-test
 #
@@ -13,15 +17,26 @@
 #
 # Individual steps can be run on their own; run `make help` for the full list.
 #
-# NOTE: The cluster name is embedded in deploy/eksctl/*.yaml. If you change
-# CLUSTER_NAME here, also update those files to match.
+# NOTE: The cluster name is embedded in the eksctl YAML files under
+# $(DEPLOY_DIR)/eksctl/. If you change CLUSTER_NAME, also update those files.
 # =============================================================================
+
+# ── Build selection ───────────────────────────────────────────────────────────
+# BUILD selects which build directory is active.
+# build0021 is the legacy single-node build.
+# build0024 and later are multi-node builds.
+BUILD ?= build0024
+
+BUILD_NUM  := $(patsubst build%,%,$(BUILD))
+IMAGE_TAG  ?= V8.0.0-build$(BUILD_NUM)
+IMAGES_DIR ?= $(BUILD)/images
+CHART_DIR  ?= $(BUILD)/deployment/fortiaigate
+DEPLOY_DIR ?= $(BUILD)/deployment/deploy
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 AWS_REGION     ?= us-east-1
 CLUSTER_NAME   ?= fortiaigate-eks
 NAMESPACE      ?= fortiaigate
-IMAGE_TAG      ?= V8.0.0-build0021
 
 AWS_ACCOUNT_ID ?= $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
 ECR_REGISTRY   := $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
@@ -35,41 +50,55 @@ INGRESS_HOST   ?= fortiaigate.example.com
 TLS_CERT       ?= certs/tls.crt
 TLS_KEY        ?= certs/tls.key
 
-# License file used by license-configmap; node name is auto-detected from the cluster
-LICENSE_FILE   ?= FAIGCNSD26000146.lic
+# License file used by license-configmap (single-node, build0021); node name is auto-detected
+LICENSE_FILE   ?= testing-licenses/FAIGCNSD26000146.lic
+
+# License files for license-configmap-two-node (build0024); assigned in kubectl node-listing order
+LICENSE_FILE_1 ?= testing-licenses/FAIGCNSD26000146.lic
+LICENSE_FILE_2 ?= testing-licenses/FAIGCNSD26000198.lic
+
+# Triton image tags — may differ between builds; override on the command line as needed
+TRITON_TAG        ?= 25.11-onnx-trt-agt
+TRITON_MODELS_TAG ?= 0.1.4
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 HELM_RELEASE    := fortiaigate
-CHART_DIR       := ./fortiaigate
-EKSCTL_TEST     := deploy/eksctl/fortiaigate-eksctl.yaml
-EKSCTL_TEST_GPU := deploy/eksctl/fortiaigate-eksctl-single-gpu.yaml
-EKSCTL_FULL     := deploy/eksctl/fortiaigate-eksctl-full.yaml
-VALUES_TEST     := deploy/helm/values-eks.yaml
-VALUES_TEST_GPU := deploy/helm/values-eks-single-gpu-overlay.yaml
-VALUES_FULL_OVR := deploy/helm/values-eks-full-overlay.yaml
+EKSCTL_TEST     := $(DEPLOY_DIR)/eksctl/fortiaigate-eksctl.yaml
+EKSCTL_TEST_GPU := $(DEPLOY_DIR)/eksctl/fortiaigate-eksctl-single-gpu.yaml
+EKSCTL_FULL     := $(DEPLOY_DIR)/eksctl/fortiaigate-eksctl-full.yaml
+VALUES_TEST     := $(DEPLOY_DIR)/helm/values-eks.yaml
+VALUES_TEST_GPU := $(DEPLOY_DIR)/helm/values-eks-single-gpu-overlay.yaml
+VALUES_FULL_OVR     := $(DEPLOY_DIR)/helm/values-eks-full-overlay.yaml
+VALUES_TWO_NODE_OVR := $(DEPLOY_DIR)/helm/values-eks-two-node-overlay.yaml
 
 FORTINET_REGISTRY := dops-jfrog.fortinet-us.com/docker-fortiaigate-local
 
+# build0024+ requires global.licenses to be populated with actual node names so
+# the per-node hostname nodeAffinity in the chart templates resolves correctly.
+# `make license-values` generates this file from the live cluster.
+LICENSE_VALUES_FILE := /tmp/fortiaigate-licenses.yaml
+
 ARCHIVES := \
-  FAIG_api-V8.0.0-build0021-FORTINET.tar \
-  FAIG_core-V8.0.0-build0021-FORTINET.tar \
-  FAIG_webui-V8.0.0-build0021-FORTINET.tar \
-  FAIG_logd-V8.0.0-build0021-FORTINET.tar \
-  FAIG_license_manager-V8.0.0-build0021-FORTINET.tar \
-  FAIG_scanner-V8.0.0-build0021-FORTINET.tar \
-  FAIG_custom-triton-V8.0.0-build0021-FORTINET.tar \
-  FAIG_triton-models-V8.0.0-build0021-FORTINET.tar
+  FAIG_api-$(IMAGE_TAG)-FORTINET.tar \
+  FAIG_core-$(IMAGE_TAG)-FORTINET.tar \
+  FAIG_webui-$(IMAGE_TAG)-FORTINET.tar \
+  FAIG_logd-$(IMAGE_TAG)-FORTINET.tar \
+  FAIG_license_manager-$(IMAGE_TAG)-FORTINET.tar \
+  FAIG_scanner-$(IMAGE_TAG)-FORTINET.tar \
+  FAIG_custom-triton-$(IMAGE_TAG)-FORTINET.tar \
+  FAIG_triton-models-$(IMAGE_TAG)-FORTINET.tar
 
 .PHONY: help \
-        deploy-test deploy-test-gpu deploy-full \
+        deploy-test deploy-test-gpu deploy-two-node deploy-full \
         cluster-test cluster-test-gpu cluster-full \
         ecr-repos \
         images-load images-push \
         alb-controller \
         efs efs-delete namespace \
         tls-self-signed tls-from-files \
-        license-configmap \
-        helm-render helm-render-test-gpu helm-install-test helm-install-test-gpu helm-install-full \
+        license-configmap license-configmap-two-node license-values \
+        helm-render helm-render-test-gpu \
+        helm-install-test helm-install-test-gpu helm-install-two-node helm-install-full \
         port-forwards local-proxy admin-password \
         helm-uninstall cluster-delete \
         check-env check-env-full
@@ -77,17 +106,22 @@ ARCHIVES := \
 # ── Help ──────────────────────────────────────────────────────────────────────
 help:
 	@printf '\nFortiAIGate EKS Deployment\n\n'
+	@printf 'Active build: BUILD=%s  IMAGE_TAG=%s\n' "$(BUILD)" "$(IMAGE_TAG)"
+	@printf '  IMAGES_DIR: %s\n' "$(IMAGES_DIR)"
+	@printf '  CHART_DIR:  %s\n' "$(CHART_DIR)"
+	@printf '  DEPLOY_DIR: %s\n\n' "$(DEPLOY_DIR)"
 	@printf 'Composite targets:\n'
 	@printf '  deploy-test          Full test setup: 1 app node, self-signed TLS, port-forward\n'
-	@printf '  deploy-test-gpu      Single-node GPU test setup: Triton/scanners enabled, port-forward\n'
+	@printf '  deploy-test-gpu      Single-node GPU test setup (build0021): Triton/scanners enabled, port-forward\n'
+	@printf '  deploy-two-node      Two-node GPU deployment (build0024): 2 app nodes + GPU, port-forward\n'
 	@printf '  deploy-full          Full setup: 2 app nodes + GPU, ALB ingress (needs ACM_CERT_ARN)\n'
 	@printf '\nCluster:\n'
-	@printf '  cluster-test         Create single app-node cluster ($(EKSCTL_TEST))\n'
-	@printf '  cluster-test-gpu     Create single GPU-backed app-node cluster ($(EKSCTL_TEST_GPU))\n'
-	@printf '  cluster-full         Create full cluster — 2 app + 1 GPU node ($(EKSCTL_FULL))\n'
+	@printf '  cluster-test         Create single app-node cluster (%s)\n' "$(EKSCTL_TEST)"
+	@printf '  cluster-test-gpu     Create single GPU-backed app-node cluster (%s)\n' "$(EKSCTL_TEST_GPU)"
+	@printf '  cluster-full         Create full cluster — 2 app + 1 GPU node (%s)\n' "$(EKSCTL_FULL)"
 	@printf '\nImages:\n'
 	@printf '  ecr-repos            Create ECR repositories\n'
-	@printf '  images-load          docker load all .tar archives\n'
+	@printf '  images-load          docker load all .tar archives from $(IMAGES_DIR)/\n'
 	@printf '  images-push          Retag and push images to ECR\n'
 	@printf '\nCluster resources:\n'
 	@printf '  alb-controller       Install AWS Load Balancer Controller + IAM service account\n'
@@ -96,12 +130,15 @@ help:
 	@printf '\nSecrets and config:\n'
 	@printf '  tls-self-signed      Generate self-signed cert and create K8s TLS secret\n'
 	@printf '  tls-from-files       Create K8s TLS secret from TLS_CERT / TLS_KEY files\n'
-	@printf '  license-configmap    Create license ConfigMap keyed to first auto-detected node name\n'
+	@printf '  license-configmap    Create license ConfigMap for single node (build0021)\n'
+	@printf '  license-configmap-two-node  Create license ConfigMap for 2 app nodes (build0024)\n'
+	@printf '  license-values       Generate %s with global.licenses from app nodes\n' "$(LICENSE_VALUES_FILE)"
 	@printf '\nHelm:\n'
 	@printf '  helm-render          Dry-run render to /tmp/fortiaigate-render.yaml\n'
 	@printf '  helm-render-test-gpu Dry-run render to /tmp/fortiaigate-render-test-gpu.yaml\n'
 	@printf '  helm-install-test    Install/upgrade with test values (ingress disabled)\n'
-	@printf '  helm-install-test-gpu Install/upgrade with test values + single-GPU overlay\n'
+	@printf '  helm-install-test-gpu Install/upgrade with test values + single-GPU overlay (build0021)\n'
+	@printf '  helm-install-two-node Install/upgrade with test values + two-node GPU overlay (build0024)\n'
 	@printf '  helm-install-full    Install/upgrade with test + full-overlay values (ALB ingress)\n'
 	@printf '  port-forwards        Start webui (8443), API (18443), and core (28443) port-forwards in background\n'
 	@printf '  local-proxy          Extract TLS cert and start reverse proxy at https://localhost:9443\n'
@@ -111,16 +148,21 @@ help:
 	@printf '  efs-delete           Delete EFS mount targets, filesystem, and security group\n'
 	@printf '  cluster-delete       Delete the EKS cluster (asks for confirmation)\n'
 	@printf '\nVariables (override with VAR=value on the command line):\n'
+	@printf '  BUILD                %s\n' "$(BUILD)"
 	@printf '  AWS_REGION           %s\n' "$(AWS_REGION)"
 	@printf '  CLUSTER_NAME         %s\n' "$(CLUSTER_NAME)"
 	@printf '  NAMESPACE            %s\n' "$(NAMESPACE)"
 	@printf '  IMAGE_TAG            %s\n' "$(IMAGE_TAG)"
+	@printf '  TRITON_TAG           %s\n' "$(TRITON_TAG)"
+	@printf '  TRITON_MODELS_TAG    %s\n' "$(TRITON_MODELS_TAG)"
 	@printf '  AWS_ACCOUNT_ID       %s\n' "$(AWS_ACCOUNT_ID)"
 	@printf '  ECR_PREFIX           %s\n' "$(ECR_PREFIX)"
 	@printf '  ACM_CERT_ARN         %s  (required for deploy-full)\n' "$(ACM_CERT_ARN)"
 	@printf '  INGRESS_HOST         %s\n' "$(INGRESS_HOST)"
 	@printf '  TLS_CERT / TLS_KEY   %s / %s  (for tls-from-files)\n' "$(TLS_CERT)" "$(TLS_KEY)"
-	@printf '  LICENSE_FILE         %s\n' "$(LICENSE_FILE)"
+	@printf '  LICENSE_FILE         %s  (single-node)\n' "$(LICENSE_FILE)"
+	@printf '  LICENSE_FILE_1       %s  (two-node, node 1)\n' "$(LICENSE_FILE_1)"
+	@printf '  LICENSE_FILE_2       %s  (two-node, node 2)\n' "$(LICENSE_FILE_2)"
 	@printf '\n'
 
 # ── Guards ────────────────────────────────────────────────────────────────────
@@ -135,17 +177,6 @@ check-env-full: check-env
 	  (echo "ERROR: ACM_CERT_ARN is required for the full setup"; exit 1)
 
 # ── Composite targets ─────────────────────────────────────────────────────────
-#deploy-test: check-env \
-#             cluster-test \
-#             ecr-repos \
-#             images-load \
-#             images-push \
-#             alb-controller \
-#             efs \
-#             namespace \
-#             tls-self-signed \
-#             license-configmap \
-#             helm-install-test
 deploy-test: cluster-test \
              efs \
              namespace \
@@ -176,10 +207,26 @@ deploy-full: check-env-full \
              namespace \
              tls-self-signed \
              license-configmap \
+             license-values \
              helm-install-full
 	@printf '\nFull deployment complete.\n'
 	@printf 'Point DNS for %s at the ALB shown by:\n' "$(INGRESS_HOST)"
 	@printf '  kubectl get ingress -n %s\n\n' "$(NAMESPACE)"
+
+deploy-two-node: check-env \
+                 cluster-full \
+                 ecr-repos \
+                 images-load \
+                 images-push \
+                 efs \
+                 namespace \
+                 tls-self-signed \
+                 license-configmap-two-node \
+                 license-values \
+                 helm-install-two-node
+	@printf '\nTwo-node deployment complete (build0024).\n'
+	@printf 'Run  make port-forwards  then  make local-proxy  to access the UI at https://localhost:9443\n'
+	@printf 'Run  make admin-password  to set the admin password on first login.\n\n'
 
 # ── Cluster ───────────────────────────────────────────────────────────────────
 cluster-test: check-env
@@ -212,11 +259,11 @@ ecr-repos: check-env
 # ── Images ────────────────────────────────────────────────────────────────────
 images-load:
 	@for archive in $(ARCHIVES); do \
-	  if [ ! -f "$$archive" ]; then \
-	    echo "WARNING: $$archive not found, skipping."; \
+	  if [ ! -f "$(IMAGES_DIR)/$$archive" ]; then \
+	    echo "WARNING: $(IMAGES_DIR)/$$archive not found, skipping."; \
 	  else \
-	    echo "Loading $$archive ..."; \
-	    docker load -i "$$archive"; \
+	    echo "Loading $(IMAGES_DIR)/$$archive ..."; \
+	    docker load -i "$(IMAGES_DIR)/$$archive"; \
 	  fi; \
 	done
 
@@ -241,12 +288,12 @@ images-push: check-env
 	docker tag $(FORTINET_REGISTRY)/scanner:$(IMAGE_TAG) \
 	  $(ECR_PREFIX)/scanner:$(IMAGE_TAG)
 	docker push $(ECR_PREFIX)/scanner:$(IMAGE_TAG)
-	docker tag $(FORTINET_REGISTRY)/custom-triton:25.11-onnx-trt-agt \
-	  $(ECR_PREFIX)/custom-triton:25.11-onnx-trt-agt
-	docker push $(ECR_PREFIX)/custom-triton:25.11-onnx-trt-agt
-	docker tag $(FORTINET_REGISTRY)/triton-models:0.1.4 \
-	  $(ECR_PREFIX)/triton-models:0.1.4
-	docker push $(ECR_PREFIX)/triton-models:0.1.4
+	docker tag $(FORTINET_REGISTRY)/custom-triton:$(TRITON_TAG) \
+	  $(ECR_PREFIX)/custom-triton:$(TRITON_TAG)
+	docker push $(ECR_PREFIX)/custom-triton:$(TRITON_TAG)
+	docker tag $(FORTINET_REGISTRY)/triton-models:$(TRITON_MODELS_TAG) \
+	  $(ECR_PREFIX)/triton-models:$(TRITON_MODELS_TAG)
+	docker push $(ECR_PREFIX)/triton-models:$(TRITON_MODELS_TAG)
 
 # ── ALB Controller ────────────────────────────────────────────────────────────
 alb-controller: check-env
@@ -275,7 +322,7 @@ alb-controller: check-env
 	helm repo update eks
 	helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
 	  -n kube-system \
-	  -f deploy/helm/aws-load-balancer-controller-values.yaml \
+	  -f $(DEPLOY_DIR)/helm/aws-load-balancer-controller-values.yaml \
 	  --set clusterName="$(CLUSTER_NAME)" \
 	  --set region="$(AWS_REGION)" \
 	  --set vpcId="$(VPC_ID)" \
@@ -344,9 +391,9 @@ efs: check-env
 	fi; \
 	echo "Applying StorageClasses with filesystem ID $$EFS_FS_ID ..."; \
 	sed "s|fileSystemId:.*|fileSystemId: $$EFS_FS_ID|" \
-	  deploy/manifests/efs-storageclass.yaml | kubectl apply -f -; \
+	  $(DEPLOY_DIR)/manifests/efs-storageclass.yaml | kubectl apply -f -; \
 	sed "s|fileSystemId:.*|fileSystemId: $$EFS_FS_ID|" \
-	  deploy/manifests/efs-storageclass-stateful.yaml | kubectl apply -f -; \
+	  $(DEPLOY_DIR)/manifests/efs-storageclass-stateful.yaml | kubectl apply -f -; \
 	echo "EFS ready: $$EFS_FS_ID"
 
 efs-delete: check-env
@@ -406,7 +453,7 @@ efs-delete: check-env
 
 # ── Namespace ─────────────────────────────────────────────────────────────────
 namespace:
-	kubectl apply -f deploy/manifests/fortiaigate-namespace.yaml
+	kubectl apply -f $(DEPLOY_DIR)/manifests/fortiaigate-namespace.yaml
 
 # ── TLS ───────────────────────────────────────────────────────────────────────
 tls-self-signed:
@@ -450,13 +497,62 @@ license-configmap:
 	  --from-file="$$NODE_NAME=$(LICENSE_FILE)" \
 	  --dry-run=client -o yaml | kubectl apply -f -
 
+# ── License ConfigMap (two-node, build0024) ───────────────────────────────────
+# Creates a ConfigMap with two entries — one per app node — keyed to the node
+# names reported by the live cluster. Nodes are assigned in kubectl listing order:
+# first app node gets LICENSE_FILE_1, second gets LICENSE_FILE_2.
+license-configmap-two-node:
+	@test -f "$(LICENSE_FILE_1)" || \
+	  (echo "ERROR: LICENSE_FILE_1 not found: $(LICENSE_FILE_1)"; exit 1)
+	@test -f "$(LICENSE_FILE_2)" || \
+	  (echo "ERROR: LICENSE_FILE_2 not found: $(LICENSE_FILE_2)"; exit 1)
+	@APP_NODES=$$(kubectl get nodes -l fortiaigate-role=app \
+	  -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); \
+	NODE_COUNT=$$(echo $$APP_NODES | wc -w | tr -d ' '); \
+	test "$$NODE_COUNT" -ge 2 || \
+	  (echo "ERROR: expected at least 2 app nodes (fortiaigate-role=app), found $$NODE_COUNT — is the cluster up?"; exit 1); \
+	NODE1=$$(echo $$APP_NODES | awk '{print $$1}'); \
+	NODE2=$$(echo $$APP_NODES | awk '{print $$2}'); \
+	echo "Creating two-node license ConfigMap:"; \
+	echo "  $$NODE1 -> $(LICENSE_FILE_1)"; \
+	echo "  $$NODE2 -> $(LICENSE_FILE_2)"; \
+	kubectl create configmap fortiaigate-license-config \
+	  --namespace "$(NAMESPACE)" \
+	  --from-file="$$NODE1=$(LICENSE_FILE_1)" \
+	  --from-file="$$NODE2=$(LICENSE_FILE_2)" \
+	  --dry-run=client -o yaml | kubectl apply -f -
+
+# ── License values (build0024+) ───────────────────────────────────────────────
+# build0024+ uses global.licenses hostname nodeAffinity in all workload templates.
+# This target generates a values file from live cluster nodes so node names do
+# not need to be hardcoded. Pass the generated file to every helm install call:
+#   helm upgrade --install ... -f $(LICENSE_VALUES_FILE)
+license-values:
+	@APP_NODES=$$(kubectl get nodes -l fortiaigate-role=app \
+	  -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); \
+	test -n "$$APP_NODES" || \
+	  (echo "ERROR: no app nodes found (label fortiaigate-role=app) — is the cluster up?"; exit 1); \
+	{ \
+	  printf 'global:\n'; \
+	  printf '  licenses:\n'; \
+	  for name in $$APP_NODES; do \
+	    printf '    "%s": null\n' "$$name"; \
+	  done; \
+	} > $(LICENSE_VALUES_FILE)
+	@echo "Generated $(LICENSE_VALUES_FILE):"
+	@cat $(LICENSE_VALUES_FILE)
+
 # ── Helm ──────────────────────────────────────────────────────────────────────
+# build0024+ includes $(LICENSE_VALUES_FILE) so that global.licenses is populated
+# with actual node names. Run `make license-values` before any helm install target
+# when using BUILD=build0024 (or later).
 helm-render:
 	helm template $(HELM_RELEASE) $(CHART_DIR) \
 	  --namespace "$(NAMESPACE)" \
 	  --set fortiaigate.image.repository="$(ECR_PREFIX)" \
 	  --set fortiaigate.image.tag="$(IMAGE_TAG)" \
 	  -f $(VALUES_TEST) \
+	  $(if $(wildcard $(LICENSE_VALUES_FILE)),-f $(LICENSE_VALUES_FILE),) \
 	  > /tmp/fortiaigate-render.yaml
 	@echo "Rendered to /tmp/fortiaigate-render.yaml"
 
@@ -466,6 +562,7 @@ helm-render-test-gpu:
 	  --set fortiaigate.image.repository="$(ECR_PREFIX)" \
 	  --set fortiaigate.image.tag="$(IMAGE_TAG)" \
 	  -f $(VALUES_TEST) \
+	  $(if $(wildcard $(LICENSE_VALUES_FILE)),-f $(LICENSE_VALUES_FILE),) \
 	  -f $(VALUES_TEST_GPU) \
 	  > /tmp/fortiaigate-render-test-gpu.yaml
 	@echo "Rendered to /tmp/fortiaigate-render-test-gpu.yaml"
@@ -476,7 +573,8 @@ helm-install-test: check-env
 	  --create-namespace \
 	  --set fortiaigate.image.repository="$(ECR_PREFIX)" \
 	  --set fortiaigate.image.tag="$(IMAGE_TAG)" \
-	  -f $(VALUES_TEST)
+	  -f $(VALUES_TEST) \
+	  $(if $(wildcard $(LICENSE_VALUES_FILE)),-f $(LICENSE_VALUES_FILE),)
 
 helm-install-test-gpu: check-env
 	helm upgrade --install $(HELM_RELEASE) $(CHART_DIR) \
@@ -485,6 +583,7 @@ helm-install-test-gpu: check-env
 	  --set fortiaigate.image.repository="$(ECR_PREFIX)" \
 	  --set fortiaigate.image.tag="$(IMAGE_TAG)" \
 	  -f $(VALUES_TEST) \
+	  $(if $(wildcard $(LICENSE_VALUES_FILE)),-f $(LICENSE_VALUES_FILE),) \
 	  -f $(VALUES_TEST_GPU)
 
 helm-install-full: check-env-full
@@ -499,7 +598,18 @@ helm-install-full: check-env-full
 	  --set fortiaigate.image.repository="$(ECR_PREFIX)" \
 	  --set fortiaigate.image.tag="$(IMAGE_TAG)" \
 	  -f $(VALUES_TEST) \
+	  $(if $(wildcard $(LICENSE_VALUES_FILE)),-f $(LICENSE_VALUES_FILE),) \
 	  -f /tmp/fortiaigate-full-overlay.yaml
+
+helm-install-two-node: check-env
+	helm upgrade --install $(HELM_RELEASE) $(CHART_DIR) \
+	  --namespace "$(NAMESPACE)" \
+	  --create-namespace \
+	  --set fortiaigate.image.repository="$(ECR_PREFIX)" \
+	  --set fortiaigate.image.tag="$(IMAGE_TAG)" \
+	  -f $(VALUES_TEST) \
+	  $(if $(wildcard $(LICENSE_VALUES_FILE)),-f $(LICENSE_VALUES_FILE),) \
+	  -f $(VALUES_TWO_NODE_OVR)
 
 # ── Access ────────────────────────────────────────────────────────────────────
 # The webui calls /api/* relative to its own origin, and LLM gateway requests

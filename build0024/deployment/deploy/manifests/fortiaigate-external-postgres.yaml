@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fortiaigate-external-postgres
+  namespace: fortiaigate
+type: Opaque
+stringData:
+  password: REPLACE_WITH_RDS_PASSWORD
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fortiaigate-external-postgres-tls
+  namespace: fortiaigate
+type: Opaque
+stringData:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    REPLACE_WITH_RDS_CA_CERTIFICATE
+    -----END CERTIFICATE-----
+  # Optional if client-certificate auth is required.
+  # tls.crt: |
+  #   -----BEGIN CERTIFICATE-----
+  #   REPLACE_WITH_CLIENT_CERTIFICATE
+  #   -----END CERTIFICATE-----
+  # tls.key: |
+  #   -----BEGIN PRIVATE KEY-----
+  #   REPLACE_WITH_CLIENT_PRIVATE_KEY
+  #   -----END PRIVATE KEY-----

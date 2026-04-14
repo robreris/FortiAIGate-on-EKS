@@ -1,0 +1,46 @@
+# Full-setup overlay — applied on top of values-eks.yaml by helm-install-full.
+#
+# The Makefile substitutes REPLACE_HOST and REPLACE_ACM_ARN before passing this
+# file to Helm. You can also fill them in directly and run helm upgrade manually:
+#
+#   helm upgrade --install fortiaigate ./fortiaigate \
+#     --namespace fortiaigate \
+#     -f values-eks.yaml \
+#     -f /tmp/fortiaigate-licenses.yaml \
+#     -f values-eks-full-overlay.yaml
+
+fortiaigate:
+  gpu:
+    enabled: true
+
+  # Triton toleration: allows the triton-server pod to schedule on the GPU
+  # node group, which has a fortiaigate-gpu=true:NoSchedule taint.
+  gpuWorkloadPlacement:
+    tolerations:
+      - key: fortiaigate-gpu
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+license_manager:
+  # The DaemonSet must run on every licensed node, including the tainted GPU node.
+  placement:
+    tolerations:
+      - key: fortiaigate-gpu
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+ingress:
+  className: alb
+  host: REPLACE_HOST
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/backend-protocol: HTTPS
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTPS
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: REPLACE_ACM_ARN

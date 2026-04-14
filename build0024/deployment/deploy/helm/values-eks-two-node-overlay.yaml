@@ -1,0 +1,32 @@
+# Two-node GPU overlay for build0024 — port-forward access (no ALB required).
+# Enables Triton and configures GPU tolerations for the tainted GPU node group.
+# Apply on top of values-eks.yaml and the generated license values file:
+#
+#   helm upgrade --install fortiaigate ./fortiaigate \
+#     --namespace fortiaigate \
+#     -f values-eks.yaml \
+#     -f /tmp/fortiaigate-licenses.yaml \
+#     -f values-eks-two-node-overlay.yaml
+
+fortiaigate:
+  gpu:
+    enabled: true
+
+  # Allow Triton to schedule on the tainted GPU node group
+  # (fortiaigate-gpu=true:NoSchedule taint set in fortiaigate-eksctl-full.yaml).
+  gpuWorkloadPlacement:
+    tolerations:
+      - key: fortiaigate-gpu
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+license_manager:
+  # The DaemonSet runs on every licensed node; the GPU node must also be tolerated
+  # so the license-manager pod can validate the Triton workload running there.
+  placement:
+    tolerations:
+      - key: fortiaigate-gpu
+        operator: Equal
+        value: "true"
+        effect: NoSchedule

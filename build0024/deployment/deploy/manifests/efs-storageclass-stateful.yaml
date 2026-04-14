@@ -1,0 +1,18 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc-stateful
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap
+  fileSystemId: fs-REPLACEME
+  basePath: /fortiaigate-stateful
+  directoryPerms: "755"
+  # Bitnami PostgreSQL and Redis run as UID/GID 1001. Setting uid/gid here
+  # causes the EFS access point to enforce this ownership on the root directory,
+  # so containers can write without needing chown (which EFS root-squashes).
+  uid: "1001"
+  gid: "1001"
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true

@@ -1,0 +1,17 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap
+  fileSystemId: fs-REPLACEME
+  basePath: /fortiaigate
+  directoryPerms: "770"
+  gidRangeStart: "10001"
+  gidRangeEnd: "20000"
+mountOptions:
+  - tls
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true

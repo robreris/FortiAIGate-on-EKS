@@ -1,16 +1,117 @@
 # FortiAIGate on Amazon EKS
 
-This directory contains FortiAIGate container image archives, a packaged Helm chart, and a patched local Helm chart. This README explains what the files appear to be, what was patched in the chart for EKS, and a practical deployment path using `eksctl`.
+This repository contains FortiAIGate container image archives, packaged Helm chart archives, and patched local Helm charts for deploying FortiAIGate on Amazon EKS. This README explains the directory structure, what was patched in each chart, and a practical deployment path using `eksctl` and `make`.
 
-This guidance is based on local inspection of the files in this directory and AWS documentation current on March 20, 2026.
+Two builds are tracked here. The Makefile `BUILD` variable selects which one is active.
 
-## What Is In This Folder
+| Build | Directory | Topology | Status |
+| --- | --- | --- | --- |
+| `build0024` | `build0024/` | Multi-node (2 app + 1 GPU) | **Default** |
+| `build0021` | `build0021/` | Single-node (legacy) | Legacy |
 
-### Product image archives
+This guidance is based on local inspection of the files in this repository and AWS documentation current on March 2026.
+
+## Directory Structure
+
+Each build follows the same layout:
+
+```
+build<N>/
+  images/                          # Image archives and the original packaged chart
+  deployment/
+    fortiaigate/                   # Patched local Helm chart
+    deploy/
+      eksctl/                      # eksctl cluster config(s)
+      helm/                        # Helm values files
+      manifests/                   # Kubernetes manifest templates
+```
+
+### build0024 — multi-node (default)
+
+```
+build0024/
+  images/
+    FAIG_api-V8.0.0-build0024-FORTINET.tar
+    FAIG_core-V8.0.0-build0024-FORTINET.tar
+    FAIG_webui-V8.0.0-build0024-FORTINET.tar
+    FAIG_logd-V8.0.0-build0024-FORTINET.tar
+    FAIG_license_manager-V8.0.0-build0024-FORTINET.tar
+    FAIG_scanner-V8.0.0-build0024-FORTINET.tar
+    FAIG_custom-triton-V8.0.0-build0024-FORTINET.tar
+    FAIG_triton-models-V8.0.0-build0024-FORTINET.tar
+    FAIG_helm_chart-V8.0.0-build0024-FORTINET.tar.gz   # Original packaged chart
+  deployment/
+    fortiaigate/                                         # Patched local chart
+    deploy/
+      eksctl/
+        fortiaigate-eksctl-full.yaml                    # 2 app nodes + 1 GPU node
+      helm/
+        values-eks.yaml                                 # Base EKS values
+        values-eks-full-overlay.yaml                    # GPU + ALB ingress overlay
+        aws-load-balancer-controller-values.yaml
+      manifests/
+        fortiaigate-namespace.yaml
+        efs-storageclass.yaml                           # Shared RWX storage (efs-sc)
+        efs-storageclass-stateful.yaml                  # PostgreSQL/Redis storage (efs-sc-stateful)
+        fortiaigate-license-config.yaml                 # Template — fill in real node names
+        fortiaigate-external-postgres.yaml              # Template for external RDS
+        fortiaigate-external-redis.yaml                 # Template for external ElastiCache
+```
+
+### build0021 — single-node (legacy)
+
+```
+build0021/
+  images/
+    FAIG_api-V8.0.0-build0021-FORTINET.tar
+    FAIG_core-V8.0.0-build0021-FORTINET.tar
+    FAIG_webui-V8.0.0-build0021-FORTINET.tar
+    FAIG_logd-V8.0.0-build0021-FORTINET.tar
+    FAIG_license_manager-V8.0.0-build0021-FORTINET.tar
+    FAIG_scanner-V8.0.0-build0021-FORTINET.tar
+    FAIG_custom-triton-V8.0.0-build0021-FORTINET.tar
+    FAIG_triton-models-V8.0.0-build0021-FORTINET.tar
+    FAIG_helm_chart-V8.0.0-build0021-FORTINET.tar       # Original packaged chart
+  deployment/
+    fortiaigate/                                          # Patched local chart
+    deploy/
+      eksctl/
+        fortiaigate-eksctl.yaml                          # Single app-node test cluster
+        fortiaigate-eksctl-single-gpu.yaml               # Single GPU-backed node cluster
+        fortiaigate-eksctl-full.yaml                     # 2 app nodes + 1 GPU node
+      helm/
+        values-eks.yaml
+        values-eks-single-gpu-overlay.yaml
+        values-eks-full-overlay.yaml
+        values-eks-external-services.yaml
+        aws-load-balancer-controller-values.yaml
+      manifests/
+        fortiaigate-namespace.yaml
+        efs-storageclass.yaml
+        efs-storageclass-stateful.yaml
+        fortiaigate-license-config.yaml
+        fortiaigate-external-postgres.yaml
+        fortiaigate-external-redis.yaml
+```
+
+## Image Archives
 
 The latest images can be found at: [FortiAIGate Image Downloads](https://info.fortinet.com/builds/?project_id=807)
 
-These tar files are saved OCI or Docker image archives:
+### build0024 (V8.0.0-build0024)
+
+| File | Image inside archive | Notes |
+| --- | --- | --- |
+| `FAIG_api-V8.0.0-build0024-FORTINET.tar` | `api:V8.0.0-build0024` | FortiAIGate API service |
+| `FAIG_core-V8.0.0-build0024-FORTINET.tar` | `core:V8.0.0-build0024` | Main backend service |
+| `FAIG_webui-V8.0.0-build0024-FORTINET.tar` | `webui:V8.0.0-build0024` | Web UI |
+| `FAIG_logd-V8.0.0-build0024-FORTINET.tar` | `logd:V8.0.0-build0024` | Logging service |
+| `FAIG_license_manager-V8.0.0-build0024-FORTINET.tar` | `license_manager:V8.0.0-build0024` | License manager |
+| `FAIG_scanner-V8.0.0-build0024-FORTINET.tar` | `scanner:V8.0.0-build0024` | Shared image used by all scanner Deployments |
+| `FAIG_custom-triton-V8.0.0-build0024-FORTINET.tar` | `custom-triton:25.11-onnx-trt-agt` | Triton inference server image |
+| `FAIG_triton-models-V8.0.0-build0024-FORTINET.tar` | `triton-models:0.1.4` | Model repository image loaded by Triton init container |
+
+### build0021 (V8.0.0-build0021)
 
 | File | Image inside archive | Notes |
 | --- | --- | --- |
@@ -27,65 +128,50 @@ Approximate archive sizes:
 
 | File | Size |
 | --- | --- |
-| `FAIG_api-V8.0.0-build0021-FORTINET.tar` | 2.11 GB |
-| `FAIG_core-V8.0.0-build0021-FORTINET.tar` | 2.17 GB |
-| `FAIG_custom-triton-V8.0.0-build0021-FORTINET.tar` | 9.68 GB |
-| `FAIG_license_manager-V8.0.0-build0021-FORTINET.tar` | 737 MB |
-| `FAIG_logd-V8.0.0-build0021-FORTINET.tar` | 1.48 GB |
-| `FAIG_scanner-V8.0.0-build0021-FORTINET.tar` | 5.68 GB |
-| `FAIG_triton-models-V8.0.0-build0021-FORTINET.tar` | 3.63 GB |
-| `FAIG_webui-V8.0.0-build0021-FORTINET.tar` | 267 MB |
+| `FAIG_api-*-FORTINET.tar` | ~2.1 GB |
+| `FAIG_core-*-FORTINET.tar` | ~2.2 GB |
+| `FAIG_custom-triton-*-FORTINET.tar` | ~9.7 GB |
+| `FAIG_license_manager-*-FORTINET.tar` | ~740 MB |
+| `FAIG_logd-*-FORTINET.tar` | ~1.5 GB |
+| `FAIG_scanner-*-FORTINET.tar` | ~5.7 GB |
+| `FAIG_triton-models-*-FORTINET.tar` | ~3.6 GB |
+| `FAIG_webui-*-FORTINET.tar` | ~270 MB |
 
-The total compressed footprint is about 25.8 GB, so give the GPU node a large root volume.
+The total compressed footprint is about 25.8 GB. Give the GPU node a large root volume.
 
-### Helm chart artifacts
+## What Was Patched In The Local Charts
 
-| File or directory | What it is |
-| --- | --- |
-| `FAIG_helm_chart-V8.0.0-build0021-FORTINET.tar` | Original packaged Helm chart from Fortinet |
-| `fortiaigate/` | Patched local Helm chart. I copied the packaged chart's vendored `charts/` and `files/` into this directory and then patched the templates for EKS use. |
+Each build includes a patched Helm chart under `build<N>/deployment/fortiaigate/`. These are the recommended deployment artifacts. The original packaged charts are preserved in `build<N>/images/` for reference.
 
-## What Was Patched In The Local Chart
+### build0024/deployment/fortiaigate
 
-The local `fortiaigate/` chart is the recommended deployment artifact now. It has these EKS-oriented changes:
+The build0024 chart is the Fortinet-provided chart with these EKS-oriented additions:
 
-1. Scheduling is label-based instead of hostname-based, and ConfigMap construction is decoupled from Helm.
-   The original chart used `global.licenses` (a `nodeName → licenseFilePath` map) for two things: building the license ConfigMap via `Files.Get`, and constraining every workload to only schedule on listed nodes via `kubernetes.io/hostname` nodeAffinity. The patched chart separates these: the ConfigMap is pre-created externally and referenced via `license.existingConfigMap`, and scheduling uses `fortiaigate-role: app` on all nodes running FortiAIGate services. `global.licenses` is retained for backwards compatibility but unused.
+1. **GPU toleration on Triton and license-manager.**
+   The original chart had no toleration mechanism for the GPU node taint (`fortiaigate-gpu=true:NoSchedule`). The patched `triton-server.yaml` and `license-manager.yaml` templates now render a `tolerations:` block from `fortiaigate.gpuWorkloadPlacement.tolerations` and `license_manager.placement.tolerations` respectively.
 
-2. TLS is injectable.
-   You can now use an existing Kubernetes TLS Secret with `tls.existingSecret`, or inline PEM material with `tls.certData` and `tls.keyData`.
+2. **License ConfigMap injection.**
+   Added `license.existingConfigMap` to `values.yaml`. When set, `license.yaml` skips chart-internal ConfigMap creation and the license-manager mounts the named ConfigMap instead. This allows node names (which are only known post-cluster-creation) to be resolved outside of Helm.
 
-3. Licenses are injectable.
-   You can now use an existing ConfigMap with `license.existingConfigMap`, inline license text with `license.data`, or the old file-based method for compatibility.
+3. **TLS Secret injection.**
+   Added `tls.existingSecret` to `values.yaml`. When set, `tls-secrets.yaml` skips chart-internal Secret creation and the existing Secret is used directly. This avoids embedding certificate material inside the chart package.
 
-4. External PostgreSQL and Redis are supported.
-   The chart now has `externalDatabase` and `externalRedis` blocks, plus Secret-backed TLS bundle mounts for external CA and optional client certificates.
+### build0021/deployment/fortiaigate
 
-5. Release-name fragility is reduced.
-   The main chart now computes its own storage claim and secret names consistently. The bundled PostgreSQL and Redis subcharts still need matching `existingClaim` values, so the example keeps `fullnameOverride: fortiaigate` and `storage.claimName: fortiaigate-storage`.
+The build0021 chart has a broader redesign for EKS:
 
-6. TLS handling is cleaner.
-   The chart only creates its own TLS Secret when the release actually needs one.
+1. **Label-based scheduling instead of hostname-based.**
+   The original chart used `global.licenses` (a `nodeName → licenseFilePath` map) for two things: building the license ConfigMap via `Files.Get`, and constraining every workload to only schedule on listed nodes via `kubernetes.io/hostname` nodeAffinity. The patched chart separates these: the ConfigMap is pre-created externally and referenced via `license.existingConfigMap`, and scheduling uses `fortiaigate-role: app` labels on all nodes running FortiAIGate services. `global.licenses` is retained for backwards compatibility but unused.
 
-## Generated Deployment Assets
+2. **TLS injection.** `tls.existingSecret` allows injecting an existing Kubernetes TLS Secret, or you can inline PEM material with `tls.certData` and `tls.keyData`.
 
-This directory now includes:
+3. **License injection.** `license.existingConfigMap` allows injecting a pre-created ConfigMap, `license.data` allows inlining license text, or the old file-based method still works.
 
-- `Makefile`
-- `deploy/eksctl/fortiaigate-eksctl.yaml` — single app-node cluster (test setup)
-- `deploy/eksctl/fortiaigate-eksctl-single-gpu.yaml` — single GPU-backed app-node cluster (single-license scanner test)
-- `deploy/eksctl/fortiaigate-eksctl-full.yaml` — 2 app nodes + GPU node (full setup)
-- `deploy/helm/values-eks.yaml` — test Helm values (GPU disabled, ingress disabled)
-- `deploy/helm/values-eks-single-gpu-overlay.yaml` — single-node GPU test overlay (Triton enabled, ingress disabled)
-- `deploy/helm/values-eks-full-overlay.yaml` — full-setup overlay (GPU, ALB ingress)
-- `deploy/helm/values-eks-external-services.yaml`
-- `deploy/helm/aws-load-balancer-controller-values.yaml`
-- `deploy/manifests/fortiaigate-namespace.yaml`
-- `deploy/manifests/efs-storageclass.yaml`
-- `deploy/manifests/fortiaigate-tls-secret.yaml`
-- `deploy/manifests/fortiaigate-license-config.yaml`
-- `deploy/manifests/fortiaigate-external-postgres.yaml`
-- `deploy/manifests/fortiaigate-external-redis.yaml`
+4. **External PostgreSQL and Redis.** `externalDatabase` and `externalRedis` blocks, plus Secret-backed TLS bundle mounts for external CA and optional client certificates.
+
+5. **Release-name consistency.** Storage claim and secret names are computed consistently from the release name.
+
+6. **Conditional TLS Secret creation.** The chart only creates its own TLS Secret when the release actually needs one.
 
 ## Recommended First Deployment Shape
 
@@ -95,7 +181,7 @@ Use this layout for the initial deployment:
 - One fixed-size app node group for FortiAIGate CPU services, PostgreSQL, Redis, and cluster add-ons
 - One fixed-size GPU node group for Triton
 - A taint on the GPU node group so only explicitly tolerated workloads land there
-- Amazon EFS for the shared RWX storage claim
+- Amazon EFS for persistent storage
 - AWS Load Balancer Controller for the Ingress
 - Amazon ECR repositories holding the FortiAIGate images
 - TLS injected from a Kubernetes Secret
@@ -127,9 +213,9 @@ kubectl logs -n fortiaigate daemonset/license-manager
 
 **One license per node.** Every node that runs FortiAIGate workloads must have its own license file, with a ConfigMap entry keyed to the node's Kubernetes node name.
 
-For the single-node GPU test (`fortiaigate-eksctl-single-gpu.yaml`), one license is sufficient because all services — CPU workloads and Triton — run on the same node. For the full cluster (`fortiaigate-eksctl-full.yaml`, 2 app nodes + 1 GPU node), three licenses are required: one per app node and one for the GPU node.
+For build0021's single-node GPU test (`fortiaigate-eksctl-single-gpu.yaml`), one license is sufficient because all services — CPU workloads and Triton — run on the same node. For the full cluster (`fortiaigate-eksctl-full.yaml`, 2 app nodes + 1 GPU node), three licenses are required: one per app node and one for the GPU node.
 
-The `license-configmap` Makefile target creates an entry only for the first node detected — for multi-node clusters you must add the remaining entries manually before deploying.
+The `license-configmap` Makefile target creates an entry only for the first node detected. For multi-node clusters, use `make license-values` to generate a values file from all live cluster nodes (see [Step 7: Generate License Values](#step-7-generate-license-values-build0024)).
 
 If a node is replaced and its name changes, update the ConfigMap key and restart the `license-manager` DaemonSet pod on that node.
 
@@ -148,21 +234,110 @@ Or use `make tls-self-signed`, which generates the cert and creates the Kubernet
 
 External HTTPS is handled separately by ACM at the ALB edge and is only needed when deploying with the full ALB ingress setup. For the initial test, ingress is disabled and `kubectl port-forward` is used instead — no ACM certificate required.
 
-## First Test Checklist
+## Deploying With the Makefile
 
-Use this order for the first end-to-end test:
+The `Makefile` at the root of this repository automates all deployment steps. It supports three deployment profiles and exposes each step as an individual target so you can re-run any part independently.
 
-1. Update [fortiaigate-eksctl.yaml](deploy/eksctl/fortiaigate-eksctl.yaml) with your Region, cluster name, and preferred instance sizes.
-2. Create the EKS cluster with `eksctl create cluster -f deploy/eksctl/fortiaigate-eksctl.yaml`.
-3. Create the ECR repositories, `docker load` the FortiAIGate image archives, retag them, and push them to ECR.
-4. Install the AWS Load Balancer Controller using [aws-load-balancer-controller-values.yaml](deploy/helm/aws-load-balancer-controller-values.yaml).
-5. Create EFS, update [efs-storageclass.yaml](deploy/manifests/efs-storageclass.yaml) with the real file system ID, and apply the namespace and StorageClass manifests.
-6. Get the real node names with `kubectl get nodes -o custom-columns=NAME:.metadata.name` and build the license ConfigMap from those names.
-7. Create the FortiAIGate TLS Secret and license ConfigMap.
-8. Update [values-eks.yaml](deploy/helm/values-eks.yaml) with your ECR prefix, hostname, and ACM certificate ARN.
-9. If you want RDS and ElastiCache for the first test, also apply [fortiaigate-external-postgres.yaml](deploy/manifests/fortiaigate-external-postgres.yaml), [fortiaigate-external-redis.yaml](deploy/manifests/fortiaigate-external-redis.yaml), and install with [values-eks-external-services.yaml](deploy/helm/values-eks-external-services.yaml).
-10. Run a final dry render with `helm template`, then install with `helm upgrade --install`.
-11. Validate pod placement, PVC binding, ALB creation, and license-manager behavior before changing node counts.
+The `BUILD` variable selects which build directory is active:
+
+```bash
+# Use build0024 (default — multi-node)
+make deploy-full
+
+# Use build0021 (legacy — single-node)
+make BUILD=build0021 deploy-test
+```
+
+### Quick start
+
+**Test setup** — 1 app node, self-signed TLS, `kubectl port-forward` for access (build0021 only):
+
+```bash
+make BUILD=build0021 deploy-test
+```
+
+**Single-license scanner test** — 1 GPU-backed node, Triton enabled (build0021 only):
+
+```bash
+make BUILD=build0021 deploy-test-gpu
+```
+
+**Full setup** — 2 app nodes + 1 GPU node, ALB ingress with an ACM certificate:
+
+```bash
+ACM_CERT_ARN=arn:aws:acm:us-east-1:123456789012:certificate/... \
+INGRESS_HOST=fortiaigate.example.com \
+make deploy-full
+```
+
+The `deploy-test` and `deploy-test-gpu` composite targets require the single-node eksctl configs that only exist under `build0021/deployment/deploy/eksctl/`. With the default `BUILD=build0024`, only `deploy-full` is supported.
+
+### Configuration variables
+
+Override any of these on the command line:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `BUILD` | `build0024` | Selects active build directory; drives `IMAGE_TAG`, `IMAGES_DIR`, `CHART_DIR`, `DEPLOY_DIR` |
+| `AWS_REGION` | `us-east-1` | |
+| `CLUSTER_NAME` | `fortiaigate-eks` | Must match the name in the eksctl YAML |
+| `NAMESPACE` | `fortiaigate` | |
+| `IMAGE_TAG` | `V8.0.0-build<N>` | Derived from `BUILD` — e.g. `build0024` → `V8.0.0-build0024` |
+| `TRITON_TAG` | `25.11-onnx-trt-agt` | Triton image tag; may differ between builds |
+| `TRITON_MODELS_TAG` | `0.1.4` | Triton models image tag; may differ between builds |
+| `AWS_ACCOUNT_ID` | Auto-detected via `aws sts` | |
+| `ACM_CERT_ARN` | *(none)* | Required for `deploy-full` |
+| `INGRESS_HOST` | `fortiaigate.example.com` | Required for `deploy-full` |
+| `TLS_CERT` / `TLS_KEY` | `certs/tls.crt` / `certs/tls.key` | Used by `tls-from-files` |
+
+Run `make help` to see the current values of all derived variables (`IMAGES_DIR`, `CHART_DIR`, `DEPLOY_DIR`).
+
+### Individual step targets
+
+All steps in the composite targets can be run on their own:
+
+| Target | What it does |
+| --- | --- |
+| `cluster-test` | Create single app-node EKS cluster (build0021 only) |
+| `cluster-test-gpu` | Create single GPU-backed app-node EKS cluster (build0021 only) |
+| `cluster-full` | Create full EKS cluster (2 app + 1 GPU node) |
+| `ecr-repos` | Create ECR repositories |
+| `images-load` | `docker load` all image archives from `$(IMAGES_DIR)/` |
+| `images-push` | Retag and push images to ECR |
+| `alb-controller` | Install AWS Load Balancer Controller and IAM service account |
+| `efs` | Create EFS filesystem, security group, mount targets, and StorageClass |
+| `namespace` | Create the `fortiaigate` namespace |
+| `tls-self-signed` | Generate a self-signed cert and create the K8s TLS secret |
+| `tls-from-files` | Create the K8s TLS secret from existing `TLS_CERT` / `TLS_KEY` files |
+| `license-configmap` | Auto-detect first node name and create license ConfigMap keyed to it |
+| `license-values` | Generate `/tmp/fortiaigate-licenses.yaml` with `global.licenses` from all cluster nodes |
+| `helm-render` | Dry-run render to `/tmp/fortiaigate-render.yaml` |
+| `helm-render-test-gpu` | Dry-run render to `/tmp/fortiaigate-render-test-gpu.yaml` |
+| `helm-install-test` | Install or upgrade with test values |
+| `helm-install-test-gpu` | Install or upgrade with test values + single-GPU overlay |
+| `helm-install-full` | Install or upgrade with test + full-overlay values |
+| `port-forwards` / `local-proxy` | Start the three local forwards and expose FortiAIGate at `https://localhost:9443` |
+| `admin-password` | Set a new admin password |
+| `helm-uninstall` | Uninstall the Helm release |
+| `cluster-delete` | Delete the EKS cluster (requires typed confirmation) |
+
+### Notes
+
+- **`BUILD` drives four derived variables.** `IMAGE_TAG`, `IMAGES_DIR`, `CHART_DIR`, and `DEPLOY_DIR` are all derived automatically from `BUILD`. Run `make help` to see the current computed values before any operation.
+
+- **`license-values` is needed for build0024.** The build0024 chart's `global.licenses` map must contain the actual cluster node names for workload placement to resolve correctly. Run `make license-values` after the cluster is up; it generates `/tmp/fortiaigate-licenses.yaml`. All `helm-install-*` targets automatically include this file when it exists.
+
+- **`license-configmap` auto-detects the first node.** It reads the first node name from `kubectl get nodes` and creates the ConfigMap with that key. Override `LICENSE_FILE` if your license file has a different name. In a multi-node cluster, add the remaining entries manually before deploying, or use the `fortiaigate-license-config.yaml` manifest template.
+
+- **`alb-controller` detects the VPC ID at runtime.** You do not need to pre-fill `vpcId` in `aws-load-balancer-controller-values.yaml`; the Makefile passes it via `--set`.
+
+- **`efs` is idempotent.** It checks for an existing security group and filesystem by tag before creating new ones, and applies the StorageClass by substituting the filesystem ID without modifying the source file.
+
+- **`deploy-test-gpu` is the simplest scanner-enabled shape.** It keeps the cluster at one GPU-backed node and schedules Triton onto that same node so scanner traffic can resolve `triton-server` without adding another licensed node. Requires `BUILD=build0021`.
+
+- **`certs/` should not be committed.** It is already covered by `.gitignore`.
+
+- **The full cluster requires 3 licenses (one per node).** The full cluster has 2 app nodes and 1 GPU node. Each node requires its own license file with a matching ConfigMap entry. See the [Licensing](#licensing) section.
 
 ## Prerequisites
 
@@ -192,92 +367,15 @@ export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 export ECR_PREFIX="${ECR_REGISTRY}/fortiaigate"
 ```
 
-## Deploying with the Makefile
-
-The `Makefile` at the root of this repository automates all deployment steps. It supports three profiles — a minimal single-node test setup, a single-node GPU scanner test setup, and the full multi-node production setup — and exposes each step as an individual target so you can re-run any part independently.
-
-### Quick start
-
-**Test setup** — 1 app node, self-signed TLS, `kubectl port-forward` for access:
-
-```bash
-make deploy-test
-```
-
-**Single-license scanner test** — 1 GPU-backed node, Triton enabled, self-signed TLS, `kubectl port-forward` for access:
-
-```bash
-make deploy-test-gpu
-```
-
-**Full setup** — 2 app nodes + 1 GPU node, ALB ingress with an ACM certificate:
-
-```bash
-ACM_CERT_ARN=arn:aws:acm:us-east-1:123456789012:certificate/... \
-INGRESS_HOST=fortiaigate.example.com \
-make deploy-full
-```
-
-### Configuration variables
-
-Override any of these on the command line:
-
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `AWS_REGION` | `us-east-1` | |
-| `CLUSTER_NAME` | `fortiaigate-eks` | Must match the name in the eksctl YAML |
-| `NAMESPACE` | `fortiaigate` | |
-| `IMAGE_TAG` | `V8.0.0-build0021` | |
-| `AWS_ACCOUNT_ID` | Auto-detected via `aws sts` | |
-| `ACM_CERT_ARN` | *(none)* | Required for `deploy-full` |
-| `INGRESS_HOST` | `fortiaigate.example.com` | Required for `deploy-full` |
-| `TLS_CERT` / `TLS_KEY` | `certs/tls.crt` / `certs/tls.key` | Used by `tls-from-files` |
-
-### Individual step targets
-
-All steps in the composite targets can be run on their own:
-
-| Target | What it does |
-| --- | --- |
-| `cluster-test` | Create single app-node EKS cluster |
-| `cluster-test-gpu` | Create single GPU-backed app-node EKS cluster |
-| `cluster-full` | Create full EKS cluster (2 app + 1 GPU node) |
-| `ecr-repos` | Create ECR repositories |
-| `images-load` | `docker load` all image archives |
-| `images-push` | Retag and push images to ECR |
-| `alb-controller` | Install AWS Load Balancer Controller and IAM service account |
-| `efs` | Create EFS filesystem, security group, mount targets, and StorageClass |
-| `namespace` | Create the `fortiaigate` namespace |
-| `tls-self-signed` | Generate a self-signed cert and create the K8s TLS secret |
-| `tls-from-files` | Create the K8s TLS secret from existing `TLS_CERT` / `TLS_KEY` files |
-| `license-configmap` | Auto-detect first node name and create license ConfigMap keyed to it |
-| `helm-render` | Dry-run render to `/tmp/fortiaigate-render.yaml` |
-| `helm-render-test-gpu` | Dry-run render to `/tmp/fortiaigate-render-test-gpu.yaml` |
-| `helm-install-test` | Install or upgrade with test values |
-| `helm-install-test-gpu` | Install or upgrade with test values + single-GPU overlay |
-| `helm-install-full` | Install or upgrade with test + full-overlay values |
-| `port-forwards` / `local-proxy` | Start the three local forwards and expose FortiAIGate at `https://localhost:9443` |
-| `admin-password` | Set a new admin password |
-| `helm-uninstall` | Uninstall the Helm release |
-| `cluster-delete` | Delete the EKS cluster (requires typed confirmation) |
-
-### Notes
-
-- **`license-configmap` auto-detects the first node.** It reads the first node name from `kubectl get nodes` and creates the ConfigMap with that key. Override `LICENSE_FILE` if your license file has a different name. In a multi-node cluster only that one node gets a matching key — see the [Licensing](#licensing) section for what this means for the full-cluster test.
-
-- **`alb-controller` detects the VPC ID at runtime.** You do not need to pre-fill `vpcId` in `aws-load-balancer-controller-values.yaml`; the Makefile passes it via `--set`.
-
-- **`efs` is idempotent.** It checks for an existing security group and filesystem by tag before creating new ones, and applies the StorageClass by substituting the filesystem ID without modifying the source file.
-
-- **`deploy-test-gpu` is the simplest scanner-enabled shape.** It keeps the cluster at one GPU-backed node and schedules Triton onto that same node so scanner traffic can resolve `triton-server` without adding another licensed node.
-
-- **`certs/` should not be committed.** It is already covered by `.gitignore`.
-
-- **The full setup requires 3 licenses (one per node).** The `license-configmap` target creates a ConfigMap entry only for the first node detected. For multi-node clusters, add entries for each remaining node before deploying. See the [Licensing](#licensing) section for details.
-
 ## Step 1: Review The `eksctl` Cluster Config
 
-Start with `deploy/eksctl/fortiaigate-eksctl.yaml`.
+Start with the eksctl config for your target topology. All configs are under `$(DEPLOY_DIR)/eksctl/` (i.e., `build0024/deployment/deploy/eksctl/` with the default build).
+
+For the full multi-node setup:
+
+```
+build0024/deployment/deploy/eksctl/fortiaigate-eksctl-full.yaml
+```
 
 Update at least:
 
@@ -298,7 +396,18 @@ The sample config uses:
 Create the cluster:
 
 ```bash
-eksctl create cluster -f deploy/eksctl/fortiaigate-eksctl.yaml
+# Full multi-node cluster (build0024 default)
+make cluster-full
+
+# Or manually:
+eksctl create cluster -f build0024/deployment/deploy/eksctl/fortiaigate-eksctl-full.yaml
+```
+
+For build0021 single-node or single-GPU test clusters:
+
+```bash
+make BUILD=build0021 cluster-test
+make BUILD=build0021 cluster-test-gpu
 ```
 
 Check nodes after creation:
@@ -315,6 +424,12 @@ The chart expects a shared repository prefix and appends image names like `/api`
 Create the repositories:
 
 ```bash
+make ecr-repos
+```
+
+Or manually:
+
+```bash
 for repo in \
   fortiaigate/api \
   fortiaigate/core \
@@ -324,7 +439,6 @@ for repo in \
   fortiaigate/scanner \
   fortiaigate/custom-triton \
   fortiaigate/triton-models
-
 do
   aws ecr create-repository --repository-name "${repo}" --region "${AWS_REGION}" >/dev/null || true
 done
@@ -332,57 +446,43 @@ done
 
 ## Step 3: Load The Image Archives And Push Them To ECR
 
-Authenticate Docker to ECR:
+Load the archives with:
+
+```bash
+make images-load
+```
+
+This loads all archives from `$(IMAGES_DIR)/` (e.g., `build0024/images/` with the default build). Each archive is skipped with a warning if not found.
+
+Push to ECR:
+
+```bash
+make images-push
+```
+
+Or manually — authenticate Docker to ECR first:
 
 ```bash
 aws ecr get-login-password --region "${AWS_REGION}" | \
   docker login --username AWS --password-stdin "${ECR_REGISTRY}"
 ```
 
-Load the archives:
+Then load and push (example for build0024):
 
 ```bash
-docker load -i FAIG_api-V8.0.0-build0021-FORTINET.tar
-docker load -i FAIG_core-V8.0.0-build0021-FORTINET.tar
-docker load -i FAIG_webui-V8.0.0-build0021-FORTINET.tar
-docker load -i FAIG_logd-V8.0.0-build0021-FORTINET.tar
-docker load -i FAIG_license_manager-V8.0.0-build0021-FORTINET.tar
-docker load -i FAIG_scanner-V8.0.0-build0021-FORTINET.tar
-docker load -i FAIG_custom-triton-V8.0.0-build0021-FORTINET.tar
-docker load -i FAIG_triton-models-V8.0.0-build0021-FORTINET.tar
-```
+docker load -i build0024/images/FAIG_api-V8.0.0-build0024-FORTINET.tar
+docker tag dops-jfrog.fortinet-us.com/docker-fortiaigate-local/api:V8.0.0-build0024 \
+  "${ECR_PREFIX}/api:V8.0.0-build0024"
+docker push "${ECR_PREFIX}/api:V8.0.0-build0024"
 
-Retag and push:
+# Repeat for core, webui, logd, license_manager, scanner
 
-```bash
-docker tag dops-jfrog.fortinet-us.com/docker-fortiaigate-local/api:V8.0.0-build0021 \
-  "${ECR_PREFIX}/api:V8.0.0-build0021"
-docker push "${ECR_PREFIX}/api:V8.0.0-build0021"
-
-docker tag dops-jfrog.fortinet-us.com/docker-fortiaigate-local/core:V8.0.0-build0021 \
-  "${ECR_PREFIX}/core:V8.0.0-build0021"
-docker push "${ECR_PREFIX}/core:V8.0.0-build0021"
-
-docker tag dops-jfrog.fortinet-us.com/docker-fortiaigate-local/webui:V8.0.0-build0021 \
-  "${ECR_PREFIX}/webui:V8.0.0-build0021"
-docker push "${ECR_PREFIX}/webui:V8.0.0-build0021"
-
-docker tag dops-jfrog.fortinet-us.com/docker-fortiaigate-local/logd:V8.0.0-build0021 \
-  "${ECR_PREFIX}/logd:V8.0.0-build0021"
-docker push "${ECR_PREFIX}/logd:V8.0.0-build0021"
-
-docker tag dops-jfrog.fortinet-us.com/docker-fortiaigate-local/license_manager:V8.0.0-build0021 \
-  "${ECR_PREFIX}/license_manager:V8.0.0-build0021"
-docker push "${ECR_PREFIX}/license_manager:V8.0.0-build0021"
-
-docker tag dops-jfrog.fortinet-us.com/docker-fortiaigate-local/scanner:V8.0.0-build0021 \
-  "${ECR_PREFIX}/scanner:V8.0.0-build0021"
-docker push "${ECR_PREFIX}/scanner:V8.0.0-build0021"
-
+docker load -i build0024/images/FAIG_custom-triton-V8.0.0-build0024-FORTINET.tar
 docker tag dops-jfrog.fortinet-us.com/docker-fortiaigate-local/custom-triton:25.11-onnx-trt-agt \
   "${ECR_PREFIX}/custom-triton:25.11-onnx-trt-agt"
 docker push "${ECR_PREFIX}/custom-triton:25.11-onnx-trt-agt"
 
+docker load -i build0024/images/FAIG_triton-models-V8.0.0-build0024-FORTINET.tar
 docker tag dops-jfrog.fortinet-us.com/docker-fortiaigate-local/triton-models:0.1.4 \
   "${ECR_PREFIX}/triton-models:0.1.4"
 docker push "${ECR_PREFIX}/triton-models:0.1.4"
@@ -417,7 +517,7 @@ eksctl create iamserviceaccount \
   --approve
 ```
 
-Review `deploy/helm/aws-load-balancer-controller-values.yaml` and update:
+Review `$(DEPLOY_DIR)/helm/aws-load-balancer-controller-values.yaml` and update:
 
 - `clusterName`
 - `region`
@@ -426,12 +526,15 @@ Review `deploy/helm/aws-load-balancer-controller-values.yaml` and update:
 Install the controller:
 
 ```bash
+make alb-controller
+
+# Or manually:
 helm repo add eks https://aws.github.io/eks-charts
 helm repo update eks
 
 helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
   -n kube-system \
-  -f deploy/helm/aws-load-balancer-controller-values.yaml \
+  -f build0024/deployment/deploy/helm/aws-load-balancer-controller-values.yaml \
   --version 1.14.0
 ```
 
@@ -448,7 +551,7 @@ Verify the controller:
 kubectl get deployment -n kube-system aws-load-balancer-controller
 ```
 
-## Step 5: Create EFS And The StorageClass
+## Step 5: Create EFS And The StorageClasses
 
 Get the VPC and subnet information:
 
@@ -504,34 +607,37 @@ do
 done
 ```
 
-Update `deploy/manifests/efs-storageclass.yaml` and replace `fs-REPLACE_ME` with your real file system ID.
+The `make efs` target automates all of the above and applies the StorageClasses. For build0024 there are two StorageClasses:
 
-Create the namespace and StorageClass:
+- `efs-sc` — shared RWX storage for the main FortiAIGate PVC. Uses GID-range-based access point ownership.
+- `efs-sc-stateful` — separate RWO storage for PostgreSQL and Redis. Uses uid/gid `1001` enforced at the EFS access-point level. This is necessary because EFS root-squashes `chown` calls, so the Bitnami `volumePermissions` init container cannot change directory ownership — the access point must enforce it instead.
+
+If running the steps manually, update the `fileSystemId` placeholder in the StorageClass manifests and apply them:
 
 ```bash
-kubectl apply -f deploy/manifests/fortiaigate-namespace.yaml
-kubectl apply -f deploy/manifests/efs-storageclass.yaml
+# Update efs-storageclass.yaml and efs-storageclass-stateful.yaml with the real EFS ID
+kubectl apply -f build0024/deployment/deploy/manifests/fortiaigate-namespace.yaml
+kubectl apply -f build0024/deployment/deploy/manifests/efs-storageclass.yaml
+kubectl apply -f build0024/deployment/deploy/manifests/efs-storageclass-stateful.yaml
 ```
 
 ## Step 6: Inject TLS And Licensing
 
-### Option A: Use the example manifest files
+### TLS Secret
 
-Edit these files:
-
-- `deploy/manifests/fortiaigate-tls-secret.yaml`
-- `deploy/manifests/fortiaigate-license-config.yaml`
-
-Then apply them:
+Create the Kubernetes TLS Secret from your certificate files. A self-signed certificate is fine for internal pod-to-pod TLS:
 
 ```bash
-kubectl apply -f deploy/manifests/fortiaigate-tls-secret.yaml
-kubectl apply -f deploy/manifests/fortiaigate-license-config.yaml
+make tls-self-signed
 ```
 
-### Option B: Create them directly from your real files
+Or from existing PEM files:
 
-Create the TLS Secret from PEM files:
+```bash
+make TLS_CERT=/path/to/tls.crt TLS_KEY=/path/to/tls.key tls-from-files
+```
+
+Or manually:
 
 ```bash
 kubectl create secret tls fortiaigate-tls-secret \
@@ -541,30 +647,56 @@ kubectl create secret tls fortiaigate-tls-secret \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Create the license ConfigMap from license files. The filename on the left side of each `--from-file` must be the Kubernetes node name that should consume that license:
+### License ConfigMap
 
-```bash
-kubectl create configmap fortiaigate-license-config \
-  --namespace "${NAMESPACE}" \
-  --from-file=ip-10-0-1-10.us-west-2.compute.internal=/path/to/app-node-1.lic \
-  --from-file=ip-10-0-2-10.us-west-2.compute.internal=/path/to/app-node-2.lic \
-  --from-file=ip-10-0-3-10.us-west-2.compute.internal=/path/to/gpu-node-1.lic \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
-
-List the actual node names with:
+Get the node names from your running cluster:
 
 ```bash
 kubectl get nodes -o custom-columns=NAME:.metadata.name
 ```
 
-The ConfigMap keys are Kubernetes node names and the values are license file content. Every node running FortiAIGate workloads must also run a `license-manager` pod — the license-manager Service uses `internalTrafficPolicy: Local`, so traffic only reaches a pod on the same node. Keep `license_manager.placement` wide enough to cover every node that runs FortiAIGate pods.
+Create the license ConfigMap from your license files. The filename on the left side of each `--from-file` must be the Kubernetes node name that should consume that license:
 
-Licensing is per-node: each node requires its own license file. See [Licensing](#licensing).
+```bash
+kubectl create configmap fortiaigate-license-config \
+  --namespace "${NAMESPACE}" \
+  --from-file=ip-10-0-1-10.us-east-1.compute.internal=/path/to/app-node-1.lic \
+  --from-file=ip-10-0-2-20.us-east-1.compute.internal=/path/to/app-node-2.lic \
+  --from-file=ip-10-0-3-30.us-east-1.compute.internal=/path/to/gpu-node-1.lic \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
 
-## Step 7: Review Helm Values
+Or use the manifest template at `$(DEPLOY_DIR)/manifests/fortiaigate-license-config.yaml` — replace the placeholder node names and license content, then apply:
 
-Edit `deploy/helm/values-eks.yaml` and replace at least:
+```bash
+kubectl apply -f build0024/deployment/deploy/manifests/fortiaigate-license-config.yaml
+```
+
+The `make license-configmap` target creates a ConfigMap entry for the first detected node only. For a multi-node cluster add the remaining entries manually after running it.
+
+Every node running FortiAIGate workloads must have a matching ConfigMap entry. The license-manager Service uses `internalTrafficPolicy: Local`, so traffic only reaches the pod on the same node.
+
+## Step 7: Generate License Values (build0024)
+
+The build0024 chart uses `global.licenses` to constrain workload placement per node. Node names are only known after the cluster is created, so this step runs against the live cluster.
+
+```bash
+make license-values
+```
+
+This generates `/tmp/fortiaigate-licenses.yaml` with the `global.licenses` map populated with all current node names. All `helm-install-*` targets automatically include this file when it exists.
+
+You can inspect the generated file before installing:
+
+```bash
+cat /tmp/fortiaigate-licenses.yaml
+```
+
+This step is not needed for build0021, which uses label-based (`fortiaigate-role: app`) scheduling instead of hostname-based nodeAffinity.
+
+## Step 8: Review Helm Values
+
+Edit the base values file and replace at least:
 
 - ECR repository prefix
 - ALB host name
@@ -572,36 +704,52 @@ Edit `deploy/helm/values-eks.yaml` and replace at least:
 - storage sizing if needed
 - any placement labels or tolerations if you change the node group labels
 
-This values file is already aligned to the patched chart and does these things:
+```
+build0024/deployment/deploy/helm/values-eks.yaml
+```
 
-- sends CPU workloads to nodes labeled `fortiaigate-role=app`
-- sends Triton to nodes labeled `fortiaigate-role=gpu`
-- tolerates the GPU taint only where needed
-- mounts a pre-created TLS Secret
-- mounts a pre-created license ConfigMap
-- keeps PostgreSQL and Redis on the app node group
-- uses the EFS-backed shared claim `fortiaigate-storage`
+This values file:
 
-## Step 8: Install FortiAIGate
+- Sends CPU workloads to nodes labeled `fortiaigate-role=app`
+- Sends Triton to nodes labeled `fortiaigate-role=gpu`
+- Enables GPU toleration only where needed (via `values-eks-full-overlay.yaml`)
+- Mounts a pre-created TLS Secret (`fortiaigate-tls-secret`)
+- Mounts a pre-created license ConfigMap (`fortiaigate-license-config`)
+- Keeps PostgreSQL and Redis on the app node group with their own EFS-backed PVCs via `efs-sc-stateful`
+- Disables `volumePermissions` on PostgreSQL and Redis (not needed with EFS access-point uid/gid enforcement)
+
+For the full setup, also review the overlay:
+
+```
+build0024/deployment/deploy/helm/values-eks-full-overlay.yaml
+```
+
+The overlay enables GPU, adds tolerations for the GPU node taint on Triton and license-manager, and configures ALB ingress.
+
+## Step 9: Install FortiAIGate
 
 Render the chart once before applying it:
 
 ```bash
-helm template fortiaigate ./fortiaigate \
-  --namespace "${NAMESPACE}" \
-  -f deploy/helm/values-eks.yaml >/tmp/fortiaigate-render.yaml
+make helm-render
 ```
 
 Install the release:
 
 ```bash
-helm upgrade --install fortiaigate ./fortiaigate \
+# Full setup with GPU
+make helm-install-full
+
+# Or manually:
+helm upgrade --install fortiaigate build0024/deployment/fortiaigate \
   --namespace "${NAMESPACE}" \
   --create-namespace \
-  -f deploy/helm/values-eks.yaml
+  -f build0024/deployment/deploy/helm/values-eks.yaml \
+  -f build0024/deployment/deploy/helm/values-eks-full-overlay.yaml \
+  -f /tmp/fortiaigate-licenses.yaml   # only if generated by make license-values
 ```
 
-## Step 9: Validate The Deployment
+## Step 10: Validate The Deployment
 
 Check the pods and where they landed:
 
@@ -667,8 +815,6 @@ The target prompts for a new password, generates a bcrypt hash, and writes it di
 - **Password**: whatever you entered at the prompt
 
 ### Manual steps (if not using the Makefile)
-
-If you prefer to run the steps individually:
 
 ```bash
 # 1. Port-forwards — all three in one shell line so they background cleanly
@@ -825,42 +971,22 @@ API keys are managed in the web UI under **Settings → API Keys**.
 
 For a production layout, I would move the stateful dependencies out of EKS.
 
-The repository now includes an overlay and example Secrets for that path:
+Both builds include example manifest templates for external services. Apply them after replacing the placeholders:
 
-- `deploy/helm/values-eks-external-services.yaml`
-- `deploy/manifests/fortiaigate-external-postgres.yaml`
-- `deploy/manifests/fortiaigate-external-redis.yaml`
+```bash
+kubectl apply -f build0024/deployment/deploy/manifests/fortiaigate-external-postgres.yaml
+kubectl apply -f build0024/deployment/deploy/manifests/fortiaigate-external-redis.yaml
+```
 
-The overlay does these things:
+The build0021 chart has a dedicated `values-eks-external-services.yaml` overlay that disables the bundled PostgreSQL and Redis subcharts and enables `externalDatabase` and `externalRedis` blocks. Build0024 does not have this overlay yet — use the same approach of setting `postgresql.enabled: false`, `redis.enabled: false`, and enabling the external blocks via the values file.
+
+The external-services overlay does these things:
 
 1. Sets `postgresql.enabled: false`.
 2. Sets `redis.enabled: false`.
 3. Enables `externalDatabase` with an RDS-style endpoint and password Secret.
 4. Enables `externalRedis` with an ElastiCache-style endpoint and password Secret.
 5. Mounts CA bundles for both services from Kubernetes Secrets.
-
-Apply the example Secrets after replacing the placeholders:
-
-```bash
-kubectl apply -f deploy/manifests/fortiaigate-external-postgres.yaml
-kubectl apply -f deploy/manifests/fortiaigate-external-redis.yaml
-```
-
-Install or upgrade using both values files:
-
-```bash
-helm upgrade --install fortiaigate ./fortiaigate \
-  --namespace "${NAMESPACE}" \
-  --create-namespace \
-  -f deploy/helm/values-eks.yaml \
-  -f deploy/helm/values-eks-external-services.yaml
-```
-
-This external-services path should work adequately if these assumptions hold:
-
-1. RDS is presented as a single reachable host and port.
-2. ElastiCache is used in a simple single-endpoint mode rather than a topology that requires Sentinel or Redis Cluster discovery.
-3. The FortiAIGate containers either trust the mounted CA bundle path or do not require mutual TLS unless you provide optional `tls.crt` and `tls.key` entries in the external TLS Secrets.
 
 Operational note:
 
@@ -872,13 +998,16 @@ Operational note:
    Licensing is per-node (one license per node). The full cluster (2 app + 1 GPU) requires 3 licenses. Ensure the license ConfigMap has an entry for every node before deploying. See [Licensing](#licensing).
 
 2. Node replacement invalidates the ConfigMap key.
-   If a node is replaced and its name changes, the ConfigMap key will no longer match and that node will be unlicensed. Update the ConfigMap and restart the `license-manager` pod on that node after any replacement.
+   If a node is replaced and its name changes, the ConfigMap key will no longer match and that node will be unlicensed. Update the ConfigMap and restart the `license-manager` pod on that node after any replacement. Re-run `make license-values` after any node group rotation.
 
 3. The bundled PostgreSQL and Redis are good for bring-up, not my preferred production shape.
    External RDS and ElastiCache are cleaner operationally.
 
 4. The image set is large.
    Slow pulls and node disk pressure are real risks if root volumes are too small.
+
+5. EFS access point uid/gid enforcement is required for PostgreSQL and Redis.
+   The `efs-sc-stateful` StorageClass sets uid/gid `1001` at the EFS access-point level. If you need to change the Bitnami PostgreSQL or Redis run-as user, update both the StorageClass and the Helm values accordingly.
 
 ## AWS References Used
 
