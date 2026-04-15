@@ -13,9 +13,10 @@ fortiaigate:
   gpu:
     enabled: true
 
-  # Triton toleration: allows the triton-server pod to schedule on the GPU
-  # node group, which has a fortiaigate-gpu=true:NoSchedule taint.
+  # Triton placement: target the GPU node group and tolerate its NoSchedule taint.
   gpuWorkloadPlacement:
+    nodeSelector:
+      fortiaigate-role: gpu
     tolerations:
       - key: fortiaigate-gpu
         operator: Equal

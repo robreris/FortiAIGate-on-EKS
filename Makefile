@@ -9,16 +9,20 @@
 # Test setup  — 1 app node, self-signed TLS, kubectl port-forward access:
 #   make deploy-test
 #
-# Scanner test  — 1 GPU-backed node, Triton enabled, kubectl port-forward access:
-#   make deploy-test-gpu
+# Scanner test  — single-node GPU (build0021), Triton enabled, port-forward access:
+#   BUILD=build0021 make deploy-test-gpu
 #
-# Full setup  — 2 app nodes + GPU node, ALB ingress with ACM certificate:
-#   ACM_CERT_ARN=arn:aws:acm:... INGRESS_HOST=fortiaigate.example.com make deploy-full
+# Two-node test  — 2 app nodes + GPU (build0024), port-forward access:
+#   BUILD=build0024 make deploy-two-node
+#
+# Two-node full  — 2 app nodes + GPU (build0024), ALB ingress (fortiaigate.fortinetcloudcse.com):
+#   ACM_CERT_ARN=arn:aws:acm:... make deploy-two-node-full
 #
 # Individual steps can be run on their own; run `make help` for the full list.
 #
-# NOTE: The cluster name is embedded in the eksctl YAML files under
-# $(DEPLOY_DIR)/eksctl/. If you change CLUSTER_NAME, also update those files.
+# NOTE: Each concurrent cluster must use a distinct CLUSTER_NAME. The eksctl
+# YAMLs use REPLACE_CLUSTER_NAME as a placeholder; the Makefile injects
+# CLUSTER_NAME at cluster-create time, so no manual YAML edits are needed.
 # =============================================================================
 
 # ── Build selection ───────────────────────────────────────────────────────────
@@ -42,9 +46,9 @@ AWS_ACCOUNT_ID ?= $(shell aws sts get-caller-identity --query Account --output t
 ECR_REGISTRY   := $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 ECR_PREFIX     := $(ECR_REGISTRY)/fortiaigate
 
-# Full setup only — required by deploy-full / helm-install-full
-ACM_CERT_ARN   ?=
-INGRESS_HOST   ?= fortiaigate.example.com
+# Required by deploy-full / deploy-two-node-full / helm-install-full
+ACM_CERT_ARN   ?= 
+INGRESS_HOST   ?= fortiaigate.fortinetcloudcse.com
 
 # Supply these when using the tls-from-files target instead of tls-self-signed
 TLS_CERT       ?= certs/tls.crt
@@ -89,17 +93,19 @@ ARCHIVES := \
   FAIG_triton-models-$(IMAGE_TAG)-FORTINET.tar
 
 .PHONY: help \
-        deploy-test deploy-test-gpu deploy-two-node deploy-full \
+        deploy-test deploy-test-gpu deploy-two-node deploy-two-node-full deploy-full \
         cluster-test cluster-test-gpu cluster-full \
         ecr-repos \
         images-load images-push \
         alb-controller \
+        nvidia-device-plugin \
         efs efs-delete namespace \
         tls-self-signed tls-from-files \
         license-configmap license-configmap-two-node license-values \
         helm-render helm-render-test-gpu \
         helm-install-test helm-install-test-gpu helm-install-two-node helm-install-full \
         port-forwards local-proxy admin-password \
+        route53-alias \
         helm-uninstall cluster-delete \
         check-env check-env-full
 
@@ -114,6 +120,7 @@ help:
 	@printf '  deploy-test          Full test setup: 1 app node, self-signed TLS, port-forward\n'
 	@printf '  deploy-test-gpu      Single-node GPU test setup (build0021): Triton/scanners enabled, port-forward\n'
 	@printf '  deploy-two-node      Two-node GPU deployment (build0024): 2 app nodes + GPU, port-forward\n'
+	@printf '  deploy-two-node-full Two-node + ALB (build0024): 2 app nodes + GPU, ALB ingress (needs ACM_CERT_ARN)\n'
 	@printf '  deploy-full          Full setup: 2 app nodes + GPU, ALB ingress (needs ACM_CERT_ARN)\n'
 	@printf '\nCluster:\n'
 	@printf '  cluster-test         Create single app-node cluster (%s)\n' "$(EKSCTL_TEST)"
@@ -125,6 +132,7 @@ help:
 	@printf '  images-push          Retag and push images to ECR\n'
 	@printf '\nCluster resources:\n'
 	@printf '  alb-controller       Install AWS Load Balancer Controller + IAM service account\n'
+	@printf '  nvidia-device-plugin Install NVIDIA device plugin DaemonSet (exposes nvidia.com/gpu)\n'
 	@printf '  efs                  Create EFS filesystem, security group, mount targets, StorageClass\n'
 	@printf '  namespace            Create the $(NAMESPACE) namespace\n'
 	@printf '\nSecrets and config:\n'
@@ -143,6 +151,7 @@ help:
 	@printf '  port-forwards        Start webui (8443), API (18443), and core (28443) port-forwards in background\n'
 	@printf '  local-proxy          Extract TLS cert and start reverse proxy at https://localhost:9443\n'
 	@printf '  admin-password       Reset the admin user password (prompts interactively)\n'
+	@printf '  route53-alias        Create/update Route 53 alias A record for INGRESS_HOST -> ALB (ALB deploy only)\n'
 	@printf '\nTeardown:\n'
 	@printf '  helm-uninstall       Helm uninstall the release\n'
 	@printf '  efs-delete           Delete EFS mount targets, filesystem, and security group\n'
@@ -203,6 +212,7 @@ deploy-full: check-env-full \
              images-load \
              images-push \
              alb-controller \
+             nvidia-device-plugin \
              efs \
              namespace \
              tls-self-signed \
@@ -218,6 +228,7 @@ deploy-two-node: check-env \
                  ecr-repos \
                  images-load \
                  images-push \
+                 nvidia-device-plugin \
                  efs \
                  namespace \
                  tls-self-signed \
@@ -228,15 +239,46 @@ deploy-two-node: check-env \
 	@printf 'Run  make port-forwards  then  make local-proxy  to access the UI at https://localhost:9443\n'
 	@printf 'Run  make admin-password  to set the admin password on first login.\n\n'
 
+deploy-two-node-full: check-env-full \
+                      cluster-full \
+                      alb-controller \
+                      nvidia-device-plugin \
+                      efs \
+                      namespace \
+                      tls-self-signed \
+                      license-configmap-two-node \
+                      license-values \
+                      helm-install-full
+	@printf '\nTwo-node full deployment complete (build0024).\n'
+	@printf 'Point DNS for %s at the ALB shown by:\n' "$(INGRESS_HOST)"
+	@printf '  kubectl get ingress -n %s\n\n' "$(NAMESPACE)"
+
+deploy-two-node-full-images: check-env-full \
+                      cluster-full \
+                      ecr-repos \
+                      images-load \
+                      images-push \
+                      alb-controller \
+                      nvidia-device-plugin \
+                      efs \
+                      namespace \
+                      tls-self-signed \
+                      license-configmap-two-node \
+                      license-values \
+                      helm-install-full
+	@printf '\nTwo-node full deployment complete (build0024).\n'
+	@printf 'Point DNS for %s at the ALB shown by:\n' "$(INGRESS_HOST)"
+	@printf '  kubectl get ingress -n %s\n\n' "$(NAMESPACE)"
+
 # ── Cluster ───────────────────────────────────────────────────────────────────
 cluster-test: check-env
-	eksctl create cluster -f $(EKSCTL_TEST)
+	sed "s/REPLACE_CLUSTER_NAME/$(CLUSTER_NAME)/g" $(EKSCTL_TEST) | eksctl create cluster -f -
 
 cluster-test-gpu: check-env
-	eksctl create cluster -f $(EKSCTL_TEST_GPU)
+	sed "s/REPLACE_CLUSTER_NAME/$(CLUSTER_NAME)/g" $(EKSCTL_TEST_GPU) | eksctl create cluster -f -
 
 cluster-full: check-env
-	eksctl create cluster -f $(EKSCTL_FULL)
+	sed "s/REPLACE_CLUSTER_NAME/$(CLUSTER_NAME)/g" $(EKSCTL_FULL) | eksctl create cluster -f -
 
 # ── ECR ───────────────────────────────────────────────────────────────────────
 ecr-repos: check-env
@@ -320,6 +362,11 @@ alb-controller: check-env
 	  --approve
 	helm repo add eks https://aws.github.io/eks-charts 2>/dev/null || true
 	helm repo update eks
+	@# Pre-install CRDs so the API server recognises them before the chart's templates run
+	helm show crds eks/aws-load-balancer-controller --version 1.14.0 | kubectl apply -f -
+	kubectl wait --for=condition=established --timeout=60s \
+	  crd/ingressclassparams.elbv2.k8s.aws \
+	  crd/targetgroupbindings.elbv2.k8s.aws
 	helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
 	  -n kube-system \
 	  -f $(DEPLOY_DIR)/helm/aws-load-balancer-controller-values.yaml \
@@ -328,6 +375,22 @@ alb-controller: check-env
 	  --set vpcId="$(VPC_ID)" \
 	  --version 1.14.0
 	kubectl rollout status deployment/aws-load-balancer-controller -n kube-system --timeout=120s
+
+# ── NVIDIA Device Plugin ──────────────────────────────────────────────────────
+# Installs the NVIDIA k8s device plugin DaemonSet, which registers nvidia.com/gpu
+# as a schedulable resource on GPU nodes. The GPU node group carries a
+# fortiaigate-gpu=true:NoSchedule taint, so the DaemonSet must tolerate it —
+# otherwise the plugin never runs on the GPU node and the resource goes unregistered.
+nvidia-device-plugin: check-env
+	helm repo add nvdp https://nvidia.github.io/k8s-device-plugin 2>/dev/null || true
+	helm repo update nvdp
+	helm upgrade --install nvidia-device-plugin nvdp/nvidia-device-plugin \
+	  --namespace kube-system \
+	  --set tolerations[0].key=fortiaigate-gpu \
+	  --set tolerations[0].operator=Equal \
+	  --set tolerations[0].value=true \
+	  --set tolerations[0].effect=NoSchedule
+	kubectl rollout status ds/nvidia-device-plugin-daemonset -n kube-system --timeout=120s
 
 # ── EFS ───────────────────────────────────────────────────────────────────────
 efs: check-env
@@ -573,6 +636,7 @@ helm-install-test: check-env
 	  --create-namespace \
 	  --set fortiaigate.image.repository="$(ECR_PREFIX)" \
 	  --set fortiaigate.image.tag="$(IMAGE_TAG)" \
+	  --set license.existingConfigMap=fortiaigate-license-config \
 	  -f $(VALUES_TEST) \
 	  $(if $(wildcard $(LICENSE_VALUES_FILE)),-f $(LICENSE_VALUES_FILE),)
 
@@ -582,6 +646,7 @@ helm-install-test-gpu: check-env
 	  --create-namespace \
 	  --set fortiaigate.image.repository="$(ECR_PREFIX)" \
 	  --set fortiaigate.image.tag="$(IMAGE_TAG)" \
+	  --set license.existingConfigMap=fortiaigate-license-config \
 	  -f $(VALUES_TEST) \
 	  $(if $(wildcard $(LICENSE_VALUES_FILE)),-f $(LICENSE_VALUES_FILE),) \
 	  -f $(VALUES_TEST_GPU)
@@ -597,6 +662,7 @@ helm-install-full: check-env-full
 	  --create-namespace \
 	  --set fortiaigate.image.repository="$(ECR_PREFIX)" \
 	  --set fortiaigate.image.tag="$(IMAGE_TAG)" \
+	  --set license.existingConfigMap=fortiaigate-license-config \
 	  -f $(VALUES_TEST) \
 	  $(if $(wildcard $(LICENSE_VALUES_FILE)),-f $(LICENSE_VALUES_FILE),) \
 	  -f /tmp/fortiaigate-full-overlay.yaml
@@ -607,6 +673,7 @@ helm-install-two-node: check-env
 	  --create-namespace \
 	  --set fortiaigate.image.repository="$(ECR_PREFIX)" \
 	  --set fortiaigate.image.tag="$(IMAGE_TAG)" \
+	  --set license.existingConfigMap=fortiaigate-license-config \
 	  -f $(VALUES_TEST) \
 	  $(if $(wildcard $(LICENSE_VALUES_FILE)),-f $(LICENSE_VALUES_FILE),) \
 	  -f $(VALUES_TWO_NODE_OVR)
@@ -669,7 +736,38 @@ admin-password:
 	    -c \"UPDATE \\\"AIGate_User\\\" SET password='\$$(cat /tmp/pwhash.txt)', \
 	    failed_login_attempts=0, locked_until=NULL, login_required_password_change=false \
 	    WHERE user_alias='admin';\""; \
-	printf 'Done. Login at https://localhost:9443 with: admin / <your password>\n'
+	printf 'Done. Login at https://$(INGRESS_HOST) (or https://localhost:9443 via local-proxy) with: admin / <your password>\n'
+
+# ── Route 53 ──────────────────────────────────────────────────────────────────
+# Creates or updates an alias A record in Route 53 pointing INGRESS_HOST at the
+# ALB provisioned by the ingress. Run once after helm-install-full when the ALB
+# hostname has been assigned. Safe to rerun (UPSERT) if the ALB is replaced.
+route53-alias: check-env
+	@set -e; \
+	echo "--- Route 53 alias record: $(INGRESS_HOST) ---"; \
+	ALB_DNS=$$(kubectl get ingress -n "$(NAMESPACE)" \
+	  -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}' 2>/dev/null); \
+	test -n "$$ALB_DNS" || (echo "ERROR: no ALB hostname on the ingress — is the ALB up?"; exit 1); \
+	echo "ALB DNS:    $$ALB_DNS"; \
+	ALB_ZONE_ID=$$(aws elbv2 describe-load-balancers \
+	  --region "$(AWS_REGION)" \
+	  --query "LoadBalancers[?DNSName=='$$ALB_DNS'].CanonicalHostedZoneId" \
+	  --output text); \
+	test -n "$$ALB_ZONE_ID" || (echo "ERROR: could not look up ALB canonical hosted zone ID"; exit 1); \
+	echo "ALB zone:   $$ALB_ZONE_ID"; \
+	R53_DOMAIN=$$(echo "$(INGRESS_HOST)" | cut -d. -f2-); \
+	R53_ZONE_ID=$$(aws route53 list-hosted-zones-by-name \
+	  --dns-name "$$R53_DOMAIN" \
+	  --query "HostedZones[0].Id" \
+	  --output text | cut -d/ -f3); \
+	test -n "$$R53_ZONE_ID" || (echo "ERROR: no Route 53 hosted zone found for $$R53_DOMAIN"; exit 1); \
+	echo "R53 zone:   $$R53_ZONE_ID"; \
+	printf '{"Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"%s","Type":"A","AliasTarget":{"HostedZoneId":"%s","DNSName":"%s","EvaluateTargetHealth":true}}}]}' \
+	  "$(INGRESS_HOST)" "$$ALB_ZONE_ID" "$$ALB_DNS" > /tmp/r53-alias-change.json; \
+	aws route53 change-resource-record-sets \
+	  --hosted-zone-id "$$R53_ZONE_ID" \
+	  --change-batch file:///tmp/r53-alias-change.json; \
+	echo "Done. Verify with: dig $(INGRESS_HOST)"
 
 # ── Teardown ──────────────────────────────────────────────────────────────────
 helm-uninstall:
