@@ -2,7 +2,7 @@ apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
 metadata:
-  name: fortiaigate-eks
+  name: REPLACE_CLUSTER_NAME
   region: us-east-1
   version: "1.35"
 
@@ -25,7 +25,7 @@ managedNodeGroups:
 
   - name: fortiaigate-gpu-ng
     amiFamily: AmazonLinux2023
-    instanceType: g5.4xlarge
+    instanceType: g5.2xlarge
     desiredCapacity: 1
     minSize: 1
     maxSize: 1

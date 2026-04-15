@@ -13,9 +13,10 @@ fortiaigate:
   gpu:
     enabled: true
 
-  # Triton toleration: allows the triton-server pod to schedule on the GPU
-  # node group, which has a fortiaigate-gpu=true:NoSchedule taint.
+  # Triton placement: target the GPU node group and tolerate its NoSchedule taint.
   gpuWorkloadPlacement:
+    nodeSelector:
+      fortiaigate-role: gpu
     tolerations:
       - key: fortiaigate-gpu
         operator: Equal
@@ -41,6 +42,5 @@ ingress:
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
     alb.ingress.kubernetes.io/backend-protocol: HTTPS
     alb.ingress.kubernetes.io/healthcheck-protocol: HTTPS
-    alb.ingress.kubernetes.io/healthcheck-path: /
     alb.ingress.kubernetes.io/ssl-redirect: "443"
     alb.ingress.kubernetes.io/certificate-arn: REPLACE_ACM_ARN

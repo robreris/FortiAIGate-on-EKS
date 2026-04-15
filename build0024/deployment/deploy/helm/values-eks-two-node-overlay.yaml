@@ -15,6 +15,8 @@ fortiaigate:
   # Allow Triton to schedule on the tainted GPU node group
   # (fortiaigate-gpu=true:NoSchedule taint set in fortiaigate-eksctl-full.yaml).
   gpuWorkloadPlacement:
+    nodeSelector:
+      fortiaigate-role: gpu
     tolerations:
       - key: fortiaigate-gpu
         operator: Equal

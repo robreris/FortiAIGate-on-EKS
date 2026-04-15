@@ -50,6 +50,12 @@ ingress:
   className: alb
   host: ""
   annotations: {}
+  # ALB IngressGroup: per-service health check paths (used when className=alb with annotations).
+  # webui/api return 200 at /; core only serves /v1/* so needs its readiness endpoint.
+  healthcheck:
+    webui: /
+    api: /openapi.json
+    core: /fortiaigate/health/readiness
 
 storage:
   size: 100Gi
