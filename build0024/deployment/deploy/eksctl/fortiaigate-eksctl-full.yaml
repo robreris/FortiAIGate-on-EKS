@@ -25,7 +25,7 @@ managedNodeGroups:
 
   - name: fortiaigate-gpu-ng
     amiFamily: AmazonLinux2023
-    instanceType: g5.4xlarge
+    instanceType: g5.2xlarge
     desiredCapacity: 1
     minSize: 1
     maxSize: 1

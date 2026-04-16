@@ -1,3 +1,116 @@
+{{- if and (eq .Values.ingress.className "alb") .Values.ingress.annotations }}
+{{- /*
+  ALB IngressGroup: three separate Ingress objects sharing one ALB via group.name.
+  This allows per-service healthcheck-path annotations, which a single Ingress cannot do.
+  group.order ensures more-specific paths (core, api) are evaluated before the catch-all (webui).
+  The healthcheck-path annotation is set per-service from ingress.healthcheck.* values;
+  any healthcheck-path entry in ingress.annotations is intentionally ignored here.
+*/}}
+
+{{- $annotations := .Values.ingress.annotations }}
+{{- $labels := dict
+  "app.kubernetes.io/name" "fortiaigate"
+  "app.kubernetes.io/part-of" "fortiaigate-platform"
+  "app.kubernetes.io/managed-by" "helm" }}
+
+# --- Core (/v1/) — order 10: most specific, evaluated first ---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fortiaigate-ingress-core
+  labels:
+    {{- range $k, $v := $labels }}
+    {{ $k }}: {{ $v }}
+    {{- end }}
+  annotations:
+    {{- range $key, $value := $annotations }}
+    {{- if ne $key "alb.ingress.kubernetes.io/healthcheck-path" }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+    {{- end }}
+    alb.ingress.kubernetes.io/group.name: fortiaigate
+    alb.ingress.kubernetes.io/group.order: "10"
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.ingress.healthcheck.core | default "/fortiaigate/health/readiness" | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /v1/
+            pathType: Prefix
+            backend:
+              service:
+                name: core
+                port:
+                  number: 8080
+---
+# --- API (/api/) — order 20 ---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fortiaigate-ingress-api
+  labels:
+    {{- range $k, $v := $labels }}
+    {{ $k }}: {{ $v }}
+    {{- end }}
+  annotations:
+    {{- range $key, $value := $annotations }}
+    {{- if ne $key "alb.ingress.kubernetes.io/healthcheck-path" }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+    {{- end }}
+    alb.ingress.kubernetes.io/group.name: fortiaigate
+    alb.ingress.kubernetes.io/group.order: "20"
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.ingress.healthcheck.api | default "/openapi.json" | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /api/
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8000
+---
+# --- WebUI (/) — order 30: catch-all, evaluated last ---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fortiaigate-ingress-webui
+  labels:
+    {{- range $k, $v := $labels }}
+    {{ $k }}: {{ $v }}
+    {{- end }}
+  annotations:
+    {{- range $key, $value := $annotations }}
+    {{- if ne $key "alb.ingress.kubernetes.io/healthcheck-path" }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+    {{- end }}
+    alb.ingress.kubernetes.io/group.name: fortiaigate
+    alb.ingress.kubernetes.io/group.order: "30"
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.ingress.healthcheck.webui | default "/" | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: webui
+                port:
+                  number: 3000
+
+{{- else }}
+{{- /* Single Ingress for non-ALB ingress classes (nginx, traefik, etc.) */}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -8,24 +121,11 @@ metadata:
     app.kubernetes.io/managed-by: helm
   annotations:
     {{- $className := .Values.ingress.className }}
-    {{- /* Priority 1: User-defined annotations take precedence */}}
     {{- if .Values.ingress.annotations }}
     {{- range $key, $value := .Values.ingress.annotations }}
     {{ $key }}: {{ $value | quote }}
     {{- end }}
-    {{- else if eq $className "alb" }}
-    {{- /* Priority 2: AWS ALB default annotations */}}
-    # === AWS ALB ===
-    kubernetes.io/ingress.class: alb
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    {{- if .Values.tls.enabled }}
-    alb.ingress.kubernetes.io/backend-protocol: HTTPS
-    alb.ingress.kubernetes.io/healthcheck-protocol: HTTPS
-    {{- end }}
     {{- else if eq $className "nginx" }}
-    {{- /* Priority 2: NGINX default annotations */}}
-    # === NGINX ===
     {{- if .Values.tls.enabled }}
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
     nginx.ingress.kubernetes.io/healthcheck-protocol: HTTPS
@@ -33,17 +133,9 @@ metadata:
     nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
     {{- end }}
     {{- else if eq $className "traefik" }}
-    {{- /* Priority 2: Traefik default annotations */}}
-    # === Traefik ===
     {{- if .Values.tls.enabled }}
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.middlewares: default-redirect-https@kubernetescrd
-    {{- end }}
-    {{- else }}
-    {{- /* Priority 2: Other ingress controllers (no defaults) */}}
-    # === Other ingress controllers ===
-    {{- if .Values.tls.enabled }}
-    # Backend TLS annotations for other ingress controllers
     {{- end }}
     {{- end }}
 
@@ -92,4 +184,4 @@ spec:
                 name: core
                 port:
                   number: 8080
-
+{{- end }}

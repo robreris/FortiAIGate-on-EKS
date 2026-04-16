@@ -388,7 +388,7 @@ nvidia-device-plugin: check-env
 	  --namespace kube-system \
 	  --set tolerations[0].key=fortiaigate-gpu \
 	  --set tolerations[0].operator=Equal \
-	  --set tolerations[0].value=true \
+	  --set-string tolerations[0].value=true \
 	  --set tolerations[0].effect=NoSchedule
 	kubectl rollout status ds/nvidia-device-plugin-daemonset -n kube-system --timeout=120s
 
