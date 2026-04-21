@@ -1,0 +1,16 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "BedrockConverseAccess",
+            "Effect": "Allow",
+            "Action": "bedrock:InvokeModel",
+            "Resource": [
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.amazon.nova-lite-v1:0",
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.google.gemma-3-4b-it",
+                "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0",
+                "arn:aws:bedrock:*::foundation-model/google.gemma-3-4b-it"
+            ]
+        }
+    ]
+}

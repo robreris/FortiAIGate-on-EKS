@@ -55,11 +55,11 @@ TLS_CERT       ?= certs/tls.crt
 TLS_KEY        ?= certs/tls.key
 
 # License file used by license-configmap (single-node, build0021); node name is auto-detected
-LICENSE_FILE   ?= testing-licenses/FAIGCNSD26000146.lic
+LICENSE_FILE   ?= testing-licenses/
 
 # License files for license-configmap-two-node (build0024); assigned in kubectl node-listing order
-LICENSE_FILE_1 ?= testing-licenses/FAIGCNSD26000146.lic
-LICENSE_FILE_2 ?= testing-licenses/FAIGCNSD26000198.lic
+LICENSE_FILE_1 ?= team-licenses/FAIGCNSD26000146.lic
+LICENSE_FILE_2 ?= team-licenses/FAIGCNSD26000198.lic
 
 # Triton image tags — may differ between builds; override on the command line as needed
 TRITON_TAG        ?= 25.11-onnx-trt-agt
